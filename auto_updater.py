@@ -143,7 +143,7 @@ def _es_para_este_hotel(target: str) -> bool:
     t = str(target or "todos").strip().lower()
     if t in ("", "todos", "all", "*"):
         return True
-    if t in NOMBRE_HOTEL.lower() or t in SPREADSHEET_ID.lower():
+    if t in NOMBRE_HOTEL.lower() or t in SPREADSHEET_ID.lower() or t in str(BASE_APP_DIR).lower():
         return True
     return False
 

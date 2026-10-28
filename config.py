@@ -18,7 +18,7 @@ PERFIL_HOTEL_PATH = DATA_DIR / "hotel_perfil.json"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
-_DEFAULT_PERFIL = {
+_PERFIL_OVALO = {
     "nombre_hotel": "Hotel El Óvalo Mariátegui",
     "spreadsheet_id": "1KudqxM1D6MSCxT5Zb2_vAOTGxnw9Ja92JuFjFpDuxZ8",
     "col_tipo_adicional": "BA",
@@ -26,8 +26,37 @@ _DEFAULT_PERFIL = {
     "app_port": 8080,
 }
 
+_PERFIL_TERRAZAS = {
+    "nombre_hotel": "Hotel Terrazas de Villa",
+    "spreadsheet_id": "1vgjOLxc-eh1zw42uC3pxnM86Lo2jZkz8_uwrEFhw8ss",
+    "col_tipo_adicional": "AZ",
+    "formula_snacks_en_s2": True,
+    "app_port": 8081,
+}
+
+_ES_CARPETA_TERRAZAS = True # "terrazas" in str(BASE_APP_DIR).lower()
+_DEFAULT_PERFIL = dict(_PERFIL_TERRAZAS if _ES_CARPETA_TERRAZAS else _PERFIL_OVALO)
+
 
 def cargar_perfil_hotel() -> dict:
+    if _ES_CARPETA_TERRAZAS:
+        perfil_t = dict(_PERFIL_TERRAZAS)
+        if PERFIL_HOTEL_PATH.exists():
+            try:
+                datos_t = json.loads(PERFIL_HOTEL_PATH.read_text(encoding="utf-8-sig"))
+                if isinstance(datos_t, dict) and datos_t.get("app_port"):
+                    perfil_t["app_port"] = int(datos_t["app_port"])
+            except Exception:
+                pass
+        try:
+            PERFIL_HOTEL_PATH.write_text(
+                json.dumps(perfil_t, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+        return perfil_t
+
     if not PERFIL_HOTEL_PATH.exists():
         try:
             PERFIL_HOTEL_PATH.write_text(
@@ -38,7 +67,7 @@ def cargar_perfil_hotel() -> dict:
             pass
         return dict(_DEFAULT_PERFIL)
     try:
-        datos = json.loads(PERFIL_HOTEL_PATH.read_text(encoding="utf-8"))
+        datos = json.loads(PERFIL_HOTEL_PATH.read_text(encoding="utf-8-sig"))
         perfil = dict(_DEFAULT_PERFIL)
         if isinstance(datos, dict):
             perfil.update({k: v for k, v in datos.items() if v is not None})

@@ -38,7 +38,7 @@ _sheet_tabs_cache = None
 
 def _get_spreadsheet():
     global _gspread_client, _spreadsheet
-    if _spreadsheet is not None:
+    if _spreadsheet is not None and getattr(_spreadsheet, "id", None) == SPREADSHEET_ID:
         return _spreadsheet
     creds_path = obtener_ruta_credenciales()
     creds = Credentials.from_service_account_file(creds_path, scopes=SCOPES)
@@ -227,6 +227,19 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
         # 5. Guardar todo en SQLite en una transacción rápida
         ahora_iso = datetime.now().isoformat()
         with db_transaction() as conn:
+            prev_sh_row = conn.execute("SELECT valor FROM estado_sistema WHERE clave = 'spreadsheet_id_activo'").fetchone()
+            prev_sh_id = str(prev_sh_row["valor"]).strip() if prev_sh_row else ""
+            if prev_sh_id != SPREADSHEET_ID:
+                conn.execute("DELETE FROM habitaciones_config")
+                conn.execute("DELETE FROM estancias WHERE dirty = 0")
+                conn.execute("DELETE FROM pagos WHERE synced = 1")
+                conn.execute("DELETE FROM ventas_tienda WHERE synced = 1")
+                conn.execute("DELETE FROM gastos WHERE synced = 1")
+                conn.execute("DELETE FROM sunat_lineas_cache")
+                conn.execute("DELETE FROM calzado_cache")
+                conn.execute("DELETE FROM vitrina_local")
+                _set_estado_sistema(conn, "spreadsheet_id_activo", SPREADSHEET_ID)
+
             _set_estado_sistema(conn, "caja_sheets_g1", caja_g1)
             _set_estado_sistema(conn, "network_online", "1")
             _set_estado_sistema(conn, "last_sync_ts", datetime.now().strftime("%H:%M:%S"))
@@ -264,10 +277,12 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
 
             # Habitaciones de Panel_Disponibilidad!A3:D31
             ultimo_precio_ref = ""
+            habs_validas: List[str] = []
             for idx_p, r in enumerate(panel_rows):
                 hab_num = str(r[1]).strip() if len(r) > 1 and r[1] else ""
                 if not hab_num:
                     continue
+                habs_validas.append(hab_num)
                 p_celda = str(r[0]).strip() if len(r) > 0 and r[0] else ""
                 if p_celda:
                     ultimo_precio_ref = p_celda
@@ -284,6 +299,9 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
                     """,
                     (hab_num, idx_p + 1, tipo_h, ultimo_precio_ref),
                 )
+            if habs_validas:
+                placeholders = ",".join("?" for _ in habs_validas)
+                conn.execute(f"DELETE FROM habitaciones_config WHERE hab NOT IN ({placeholders})", tuple(habs_validas))
 
             # Si es bootstrap completo, poblar el padrón histórico de huéspedes y empresas (~5,400 filas)
             if all_bd_values is not None and len(all_bd_values) >= 2:

@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from config import APP_HOST, APP_PORT, STATIC_DIR, SYNC_INTERVAL_SECONDS
+from config import APP_HOST, APP_PORT, STATIC_DIR, SYNC_INTERVAL_SECONDS, NOMBRE_HOTEL
 from database import get_connection, init_db
 from domain_logic import (
     actualizar_comprobante_desde_panel_local,
@@ -282,6 +282,7 @@ def _obtener_vista_formulario_local(nombre_vista: str) -> str:
     if not fpath.exists():
         raise FileNotFoundError(f"Archivo de vista no encontrado: {fname}")
     html = fpath.read_text(encoding="utf-8")
+    html = html.replace("{{NOMBRE_HOTEL}}", NOMBRE_HOTEL)
     # Igual que Código.js (BRIDGE_BODY_): preselecciona habitación/pestaña enviada por el Panel
     # y avisa al Panel para refrescarse cuando el formulario guarda algo.
     if re.search(r"</body>", html, re.IGNORECASE):
@@ -294,8 +295,10 @@ def _obtener_vista_formulario_local(nombre_vista: str) -> str:
 @app.get("/", response_class=HTMLResponse)
 def index():
     panel_path = STATIC_DIR / "PanelDisponibilidad.html"
-    return FileResponse(
-        str(panel_path),
+    html = panel_path.read_text(encoding="utf-8")
+    html = html.replace("{{NOMBRE_HOTEL}}", NOMBRE_HOTEL)
+    return HTMLResponse(
+        content=html,
         media_type="text/html; charset=utf-8",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )

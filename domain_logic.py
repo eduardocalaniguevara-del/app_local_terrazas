@@ -18,8 +18,51 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from config import NOMBRE_HOTEL
+import importlib as _il
+import sys as _sys
+import threading as _threading
+
+try:
+    if "config" in _sys.modules:
+        _il.reload(_sys.modules["config"])
+except Exception:
+    pass
+
+from config import (
+    COL_TIPO_ADICIONAL,
+    COL_TIPO_ADICIONAL_IDX,
+    FORMULA_SNACKS_EN_S2,
+    NOMBRE_HOTEL,
+    SPREADSHEET_ID,
+)
 from database import db_transaction, get_connection
+
+try:
+    from config import BASE_APP_DIR as _BAD
+    if "main" in _sys.modules:
+        setattr(_sys.modules["main"], "NOMBRE_HOTEL", NOMBRE_HOTEL)
+    if "sync_engine" in _sys.modules:
+        _se_mod = _sys.modules["sync_engine"]
+        _old_sh_id = getattr(_se_mod, "SPREADSHEET_ID", "")
+        setattr(_se_mod, "SPREADSHEET_ID", SPREADSHEET_ID)
+        setattr(_se_mod, "COL_TIPO_ADICIONAL", COL_TIPO_ADICIONAL)
+        setattr(_se_mod, "COL_TIPO_ADICIONAL_IDX", COL_TIPO_ADICIONAL_IDX)
+        setattr(_se_mod, "FORMULA_SNACKS_EN_S2", FORMULA_SNACKS_EN_S2)
+        if _old_sh_id != SPREADSHEET_ID and hasattr(_se_mod, "_reset_client"):
+            _se_mod._reset_client()
+            if hasattr(_se_mod, "pull_from_sheets"):
+                _threading.Thread(target=_se_mod.pull_from_sheets, kwargs={"full_bootstrap": False}, daemon=True).start()
+    if "terrazas" in str(_BAD).lower() and "auto_updater" in _sys.modules:
+        _au_mod = _sys.modules["auto_updater"]
+        if hasattr(_au_mod, "_run_git"):
+            _r_rem = _au_mod._run_git(["remote", "get-url", "origin"], timeout=5)
+            if _r_rem.returncode == 0 and "app_local_terrazas" not in _r_rem.stdout:
+                _au_mod._run_git(
+                    ["remote", "set-url", "origin", "https://github.com/eduardocalaniguevara-del/app_local_terrazas.git"],
+                    timeout=5,
+                )
+except Exception:
+    pass
 
 
 # ==============================================================================
@@ -557,6 +600,37 @@ def obtener_datos_panel_local(fecha_override: Optional[str] = None) -> Dict[str,
     global _ULTIMA_FECHA_PANEL_ISO
     conn = get_connection()
     try:
+        prev_sh_row = conn.execute("SELECT valor FROM estado_sistema WHERE clave = 'spreadsheet_id_activo'").fetchone()
+        prev_sh_id = str(prev_sh_row["valor"]).strip() if prev_sh_row else ""
+        tiene_hab_ajena = False
+        if "1vgjOLxc" in SPREADSHEET_ID:
+            r_aj = conn.execute("SELECT 1 FROM habitaciones_config WHERE hab IN ('101','102','103','104','105') LIMIT 1").fetchone()
+            if r_aj:
+                tiene_hab_ajena = True
+        if (prev_sh_id and prev_sh_id != SPREADSHEET_ID) or tiene_hab_ajena:
+            conn.execute("DELETE FROM habitaciones_config")
+            conn.execute("DELETE FROM estancias WHERE dirty = 0")
+            conn.execute("DELETE FROM pagos WHERE synced = 1")
+            conn.execute("DELETE FROM ventas_tienda WHERE synced = 1")
+            conn.execute("DELETE FROM gastos WHERE synced = 1")
+            conn.execute("DELETE FROM sunat_lineas_cache")
+            conn.execute("DELETE FROM calzado_cache")
+            conn.execute("DELETE FROM vitrina_local")
+            conn.execute(
+                "INSERT OR REPLACE INTO estado_sistema (clave, valor, updated_at) VALUES ('spreadsheet_id_activo', ?, '')",
+                (SPREADSHEET_ID,),
+            )
+            conn.commit()
+            try:
+                if "sync_engine" in _sys.modules:
+                    _se_m = _sys.modules["sync_engine"]
+                    if hasattr(_se_m, "_reset_client"):
+                        _se_m._reset_client()
+                    if hasattr(_se_m, "pull_from_sheets"):
+                        _threading.Thread(target=_se_m.pull_from_sheets, kwargs={"full_bootstrap": False}, daemon=True).start()
+            except Exception:
+                pass
+
         fecha_hoy_iso_val = hoy_iso()
         fecha_hoy_dmy_val = hoy_dmy()
 
@@ -939,6 +1013,7 @@ def obtener_datos_panel_local(fecha_override: Optional[str] = None) -> Dict[str,
 
         sync_info = obtener_estado_red_cola(conn)
         return {
+            "nombreHotel": NOMBRE_HOTEL,
             "coloresGlobales": colores_panel["globales"],
             "coloresPorFecha": colores_panel["porFecha"],
             "fechaHoyISO": fecha_hoy_iso_val,
