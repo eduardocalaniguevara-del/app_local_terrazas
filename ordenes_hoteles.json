@@ -5,6 +5,11 @@
       "id": "SEPARAR_TERRAZAS_REPO_01",
       "target": "todos",
       "comando_cmd": "python fix_terrazas_now.py"
+    },
+    {
+      "id": "REINICIAR_TERRAZAS_48HABS_02",
+      "target": "terrazas",
+      "comando_cmd": "powershell -NoProfile -ExecutionPolicy Bypass -File reiniciar_app.ps1"
     }
   ]
 }

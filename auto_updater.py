@@ -316,8 +316,21 @@ def verificar_y_aplicar_actualizacion() -> Dict[str, Any]:
         if rst.returncode != 0:
             return {"actualizado": False, "motivo": "reset_error", "detalle": rst.stderr.strip()}
 
+        cambiados = []
+        try:
+            df = _run_git(["diff", "--name-only", sha_local, sha_remoto], timeout=10)
+            cambiados = [x.strip() for x in df.stdout.splitlines() if x.strip()]
+        except Exception:
+            pass
+
         procesar_ordenes_remotas()
         recargar_en_memoria_sin_cortes()
+
+        # Solo domain_logic y los HTML se recargan en caliente. Si cambió cualquier otro .py
+        # (sync_engine, config, main, database...) el proceso sigue con el código viejo en memoria:
+        # hay que reiniciarlo para que el cambio tenga efecto.
+        if any(f.endswith(".py") and f != "domain_logic.py" for f in cambiados):
+            reiniciar_proceso_completo()
 
         return {
             "actualizado": True,
@@ -326,6 +339,37 @@ def verificar_y_aplicar_actualizacion() -> Dict[str, Any]:
         }
     except Exception as exc:
         return {"actualizado": False, "motivo": "excepcion", "detalle": str(exc)}
+
+
+def reiniciar_proceso_completo() -> None:
+    """
+    Reinicia el servidor local por completo (nuevo proceso, código nuevo en memoria).
+    Lanza un relevo desacoplado que espera a que este proceso libere el puerto y
+    vuelve a encender lanzador_escritorio.py sin abrir ventanas nuevas; luego termina este proceso.
+    """
+    try:
+        py = sys.executable
+        if py.lower().endswith("python.exe"):
+            pyw = py[:-10] + "pythonw.exe"
+            if os.path.exists(pyw):
+                py = pyw
+        lanzador = str(BASE_APP_DIR / "lanzador_escritorio.py")
+        relevo = (
+            "import subprocess,sys,time; time.sleep(4); "
+            "subprocess.Popen([sys.argv[1], sys.argv[2], '--no-browser'], cwd=sys.argv[3], "
+            "creationflags=0x00000008|0x08000000, close_fds=True)"
+        )
+        subprocess.Popen(
+            [py, "-c", relevo, py, lanzador, str(BASE_APP_DIR)],
+            cwd=str(BASE_APP_DIR),
+            creationflags=(0x00000008 | 0x08000000) if os.name == "nt" else 0,
+            close_fds=True,
+        )
+        print("[AUTO-UPDATER] Reiniciando servidor para aplicar la actualización...")
+        time.sleep(0.5)
+        os._exit(0)
+    except Exception as exc:
+        print(f"[AUTO-UPDATER] No se pudo reiniciar el proceso: {exc}")
 
 
 def reiniciar_servidor_en_caliente() -> None:
