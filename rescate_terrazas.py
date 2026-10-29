@@ -143,16 +143,8 @@ def main() -> None:
 
     registrar_orden_ejecutada()
 
-    # Limpiar habitaciones truncadas previas y sincronizar las 48 habitaciones con el nuevo sync_engine
+    # Sincronizar las 48 habitaciones con el nuevo sync_engine (sin borrar antes por si hay cuota 429)
     db_path = DATA_DIR / "ovalo_local.db"
-    if db_path.exists():
-        try:
-            conn = sqlite3.connect(str(db_path), timeout=20.0)
-            conn.execute("DELETE FROM habitaciones_config")
-            conn.commit()
-            conn.close()
-        except Exception:
-            pass
 
     creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     try:
