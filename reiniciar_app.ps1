@@ -4,7 +4,6 @@ $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $leaf = Split-Path -Leaf $dir
 $bat = Join-Path $dir "Iniciar_Recepcion_Local.bat"
 
-# Determinar el puerto de este hotel desde data\hotel_perfil.json
 $port = if ($dir -match 'terrazas') { 8081 } else { 8080 }
 $perfilPath = Join-Path $dir "data\hotel_perfil.json"
 if (Test-Path $perfilPath) {
@@ -16,7 +15,6 @@ if (Test-Path $perfilPath) {
 
 $pids = New-Object System.Collections.Generic.HashSet[int]
 
-# 1. Cualquier proceso escuchando en el puerto de este hotel
 try {
     $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
     foreach ($c in $conns) {
@@ -24,7 +22,6 @@ try {
     }
 } catch {}
 
-# 2. Cualquier python/pythonw ejecutando lanzador_escritorio de esta carpeta
 try {
     $procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
         $_.Name -match '^pythonw?\.exe$' -and $_.CommandLine -and ($_.CommandLine -like "*lanzador_escritorio*") -and ($_.CommandLine -like "*$leaf*")
@@ -43,7 +40,7 @@ foreach ($i in @(__IDS__)) {
     if ($i -gt 4) { Stop-Process -Id $i -Force -ErrorAction SilentlyContinue }
 }
 Start-Sleep -Seconds 2
-Start-Process -FilePath "cmd.exe" -ArgumentList @('/c', '""__BAT__" --no-browser"') -WorkingDirectory '__DIR__' -WindowStyle Hidden
+Start-Process -FilePath '__BAT__' -ArgumentList '--no-browser' -WorkingDirectory '__DIR__' -WindowStyle Hidden
 '@
 
 $relevo = $plantilla.Replace('__IDS__', $idList).Replace('__BAT__', $bat).Replace('__DIR__', $dir)
