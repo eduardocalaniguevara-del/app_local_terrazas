@@ -1,6 +1,6 @@
 /**
  * Puente RPC Local en 0 ms (Sustituye google.script.run por FastAPI + SQLite Local)
- * Incluye monitor en tiempo real de Estado de Red y Cola de Sincronización.
+ * Incluye monitor en tiempo real de Estado de Red, Cola de Sincronización y Auto-Recarga UI (<30s).
  */
 (function () {
   function createGoogleScriptRunner(successHandler, failureHandler, userObject) {
@@ -73,6 +73,14 @@
     return document.getElementById("badgeEstadoSync") || document.getElementById("badgeSync");
   }
 
+  function hayFormularioAbierto() {
+    const drawer = document.getElementById("appDrawerOverlay") || document.getElementById("drawerBackdrop");
+    if (drawer && !drawer.classList.contains("hidden")) return true;
+    const modEst = document.getElementById("modalModificarEstancia");
+    if (modEst && !modEst.classList.contains("hidden")) return true;
+    return false;
+  }
+
   window.actualizarBadgeEstadoRed = function (syncStatus) {
     if (syncStatus && syncStatus.nombreHotel && window === window.top) {
       document.title = "Panel de Disponibilidad — " + syncStatus.nombreHotel;
@@ -95,7 +103,7 @@
     if (!isOnline) {
       badge.className =
         "text-[11px] font-black text-red-950 bg-red-200 border-2 border-red-500 px-2.5 py-0.5 rounded-md shadow-xs transition-all hover:bg-red-300";
-      
+
       let textoOff = "🔴 Offline";
       if (minOffline > 0) {
         textoOff += ` hace ${minOffline} min`;
@@ -118,11 +126,11 @@
       badge.className =
         "text-[11px] font-black text-blue-950 bg-blue-100 border border-blue-400 px-2.5 py-0.5 rounded-md shadow-2xs transition-all hover:bg-blue-200";
       badge.textContent = `🔄 Subiendo a Sheets (${pending})...`;
-      badge.title = `Subiendo ${pending} operación(es) a Google Sheets en segundo plano.\nÚltima sinc.: ${lastSync || 'reciente'}.\nClic para forzar.`;
+      badge.title = `Subiendo ${pending} operación(es) a Google Sheets en segundo plano.\nÚltima sinc.: ${lastSync || "reciente"}.\nClic para forzar.`;
     } else {
       badge.className =
         "text-[11px] font-extrabold text-emerald-900 bg-emerald-100 px-2.5 py-0.5 rounded-md border border-emerald-300 transition-all hover:bg-emerald-200";
-      
+
       let textoOn = "🟢 En vivo";
       if (minSync === 0) {
         textoOn += ` (hace instantes · ${lastSync})`;
@@ -132,7 +140,7 @@
         textoOn += ` (${lastSync})`;
       }
       badge.textContent = textoOn;
-      badge.title = `Conectado y sincronizado con Google Sheets.\n• Última sincronización exitosa: ${lastSync || 'hace instantes'}.\n👉 Clic para forzar sincronización ahora.`;
+      badge.title = `Conectado y sincronizado con Google Sheets.\n• Última sincronización exitosa: ${lastSync || "hace instantes"}.\n👉 Clic para forzar sincronización ahora.`;
     }
   };
 
@@ -156,19 +164,16 @@
       });
   };
 
-  // Monitor periódico ligero cada 8 segundos
-  setInterval(function () {
-    if (!getBadgeEl()) return;
-    fetch("/api/sync/status")
+  function chequearEstadoYVersion() {
+    if (window !== window.top) return;
+    fetch("/api/sync/status?_t=" + Date.now(), { cache: "no-store" })
       .then((r) => r.json())
       .then((st) => {
         if (st && st.uiVersion) {
           if (!window._uiVersionLoaded) {
             window._uiVersionLoaded = st.uiVersion;
           } else if (window._uiVersionLoaded !== st.uiVersion) {
-            const drawerEl = document.getElementById("drawerBackdrop");
-            const drawerOpen = drawerEl && !drawerEl.classList.contains("hidden");
-            if (!drawerOpen) {
+            if (!hayFormularioAbierto()) {
               window.location.reload();
               return;
             }
@@ -183,5 +188,9 @@
       .catch(() => {
         window.actualizarBadgeEstadoRed({ online: false, pendingCount: 0 });
       });
-  }, 8000);
+  }
+
+  // Fijar versión inicial apenas carga y monitorear cambios cada 5 segundos
+  setTimeout(chequearEstadoYVersion, 1200);
+  setInterval(chequearEstadoYVersion, 5000);
 })();

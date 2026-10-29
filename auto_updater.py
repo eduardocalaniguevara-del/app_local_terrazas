@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Motor de Auto-Actualización silenciosa vía Git para los 3 Hoteles.
-Revisa periódicamente si hay cambios en GitHub (origin/main), descarga el código
-nuevo sin tocar la carpeta data/ (ni hotel_perfil.json ni ovalo_local.db) y
-recarga los módulos e interfaces en memoria sin tumbar el servidor ni abrir ventanas CMD.
+Motor de Auto-Actualización silenciosa Dual (Git + HTTPS Nativo Python) para Multi-Hotel.
+Revisa cada 20 segundos si hay cambios en GitHub (origin/main):
+- Funciona CON Git o SIN Git (descarga directa sin caché desde codeload.github.com).
+- Respeta siempre la carpeta data/ (hotel_perfil.json, credentials.json, ovalo_local.db).
+- Si cambian vistas HTML/JS o domain_logic.py, recarga en caliente en 0 ms.
+- Si cambian motores base (.py), reinicia el servidor silenciosamente en segundo plano.
 """
 
 import importlib
+import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
+import zipfile
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from config import BASE_APP_DIR, DATA_DIR, NOMBRE_HOTEL, PERFIL_HOTEL_PATH, SPREADSHEET_ID
 
@@ -25,6 +31,20 @@ _GIT_CANDIDATES = [
     r"C:\Program Files\Git\cmd\git.exe",
     r"C:\Program Files (x86)\Git\cmd\git.exe",
 ]
+
+_SHA_FILE = DATA_DIR / "git_head_sha.txt"
+_TERRAZAS_SHEET_ID = "1vgjOLxc-eh1zw42uC3pxnM86Lo2jZkz8_uwrEFhw8ss"
+
+
+def _obtener_repo_slug() -> str:
+    es_terrazas = (
+        "terrazas" in NOMBRE_HOTEL.lower()
+        or SPREADSHEET_ID.strip() == _TERRAZAS_SHEET_ID
+        or "terrazas" in str(BASE_APP_DIR).lower()
+    )
+    if es_terrazas:
+        return "eduardocalaniguevara-del/app_local_terrazas"
+    return "eduardocalaniguevara-del/app_local_recepcion"
 
 
 def obtener_git_exe() -> str:
@@ -52,22 +72,122 @@ def _run_git(args: list, timeout: int = 15) -> subprocess.CompletedProcess:
     )
 
 
-def obtener_version_actual() -> str:
-    git_dir = BASE_APP_DIR / ".git"
-    if not git_dir.exists():
-        try:
-            p1 = (BASE_APP_DIR / "domain_logic.py").stat().st_mtime
-            p2 = (BASE_APP_DIR / "static" / "PanelDisponibilidad.html").stat().st_mtime
-            return f"local-{int(max(p1, p2))}"
-        except Exception:
-            return "local-0"
+def _leer_sha_guardado() -> str:
     try:
-        r = _run_git(["rev-parse", "--short", "HEAD"], timeout=5)
-        if r.returncode == 0 and r.stdout.strip():
-            return r.stdout.strip()
+        if _SHA_FILE.exists():
+            val = _SHA_FILE.read_text(encoding="utf-8").strip()
+            if len(val) >= 7:
+                return val
     except Exception:
         pass
-    return "git-unknown"
+    return ""
+
+
+def _guardar_sha_local(sha_full: str) -> None:
+    if not sha_full:
+        return
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _SHA_FILE.write_text(sha_full.strip(), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def obtener_version_actual() -> str:
+    sha_txt = _leer_sha_guardado()
+    git_dir = BASE_APP_DIR / ".git"
+    if git_dir.exists():
+        try:
+            r = _run_git(["rev-parse", "--short", "HEAD"], timeout=5)
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+        except Exception:
+            pass
+    if sha_txt:
+        return sha_txt[:7]
+    try:
+        p1 = (BASE_APP_DIR / "domain_logic.py").stat().st_mtime
+        p2 = (BASE_APP_DIR / "static" / "PanelDisponibilidad.html").stat().st_mtime
+        return f"local-{int(max(p1, p2))}"
+    except Exception:
+        return "local-0"
+
+
+def _obtener_sha_local_completo() -> str:
+    git_dir = BASE_APP_DIR / ".git"
+    if git_dir.exists():
+        try:
+            r = _run_git(["rev-parse", "HEAD"], timeout=5)
+            if r.returncode == 0 and len(r.stdout.strip()) == 40:
+                return r.stdout.strip()
+        except Exception:
+            pass
+    return _leer_sha_guardado()
+
+
+def _consultar_sha_remoto_https(repo_slug: str) -> str:
+    """
+    Consulta el SHA exacto de refs/heads/main en tiempo real (0 caché CDN, 0 rate limit, 0 git.exe).
+    """
+    url = f"https://github.com/{repo_slug}/info/refs?service=git-upload-pack"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "git/2.47.1",
+            "Cache-Control": "no-cache, no-store",
+            "Pragma": "no-cache",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    m = re.search(r"([0-9a-f]{40})\s+refs/heads/main\b", raw)
+    return m.group(1) if m else ""
+
+
+def _aplicar_zip_remoto_https(repo_slug: str, sha_remoto: str) -> List[str]:
+    """
+    Descarga el archivo ZIP exacto del commit por SHA desde codeload.github.com (inmune a caché)
+    y sobrescribe únicamente los archivos modificados, protegiendo siempre data/ y bases .db.
+    """
+    url = f"https://codeload.github.com/{repo_slug}/zip/{sha_remoto}"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 HostalUpdater/2.0"})
+    with urllib.request.urlopen(req, timeout=25) as resp:
+        zip_bytes = resp.read()
+
+    cambiados: List[str] = []
+    protected_prefixes = ("data/", ".git/", "__pycache__/")
+    protected_exts = (".db", ".db-wal", ".db-shm", ".db-journal", ".log", ".pyc")
+
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            parts = info.filename.split("/", 1)
+            if len(parts) < 2 or not parts[1]:
+                continue
+            rel_posix = parts[1]
+            rel_lower = rel_posix.lower()
+            if any(rel_lower.startswith(pref) for pref in protected_prefixes):
+                continue
+            if any(rel_lower.endswith(ext) for ext in protected_exts):
+                continue
+
+            new_data = zf.read(info.filename)
+            dest = BASE_APP_DIR / Path(rel_posix)
+            old_data = None
+            if dest.exists():
+                try:
+                    old_data = dest.read_bytes()
+                except Exception:
+                    old_data = None
+
+            if old_data != new_data:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(new_data)
+                cambiados.append(rel_posix)
+
+    _guardar_sha_local(sha_remoto)
+    return cambiados
 
 
 _LAST_DL_MTIME: float = 0.0
@@ -95,8 +215,7 @@ def _verificar_recarga_local_mtime() -> bool:
 def recargar_en_memoria_sin_cortes() -> None:
     """
     Recarga domain_logic directamente en memoria y actualiza el timestamp
-    de PanelDisponibilidad.html para que el navegador refresque la vista sin
-    matar el servidor ni interrumpir el hilo de sincronización de sync_engine.
+    de PanelDisponibilidad.html para que el navegador refresque la vista automáticamente.
     """
     global _LAST_DL_MTIME
     try:
@@ -122,7 +241,7 @@ def _cargar_ordenes_ejecutadas() -> set:
     if not f.exists():
         return set()
     try:
-        return set(json.loads(f.read_text(encoding="utf-8")))
+        return set(json.loads(f.read_text(encoding="utf-8-sig")))
     except Exception:
         return set()
 
@@ -150,15 +269,13 @@ def _es_para_este_hotel(target: str) -> bool:
 
 def procesar_ordenes_remotas() -> None:
     """
-    Puerta de Mando Remota vía GitHub (ordenes_hoteles.json):
-    Permite instalar librerías pip, ejecutar comandos de mantenimiento,
-    actualizar hotel_perfil.json o desacoplar un hotel a un nuevo repositorio Git.
+    Puerta de Mando Remota vía GitHub (ordenes_hoteles.json).
     """
     ord_path = BASE_APP_DIR / "ordenes_hoteles.json"
     if not ord_path.exists():
         return
     try:
-        data = json.loads(ord_path.read_text(encoding="utf-8"))
+        data = json.loads(ord_path.read_text(encoding="utf-8-sig"))
         ordenes = data.get("ordenes", []) if isinstance(data, dict) else []
     except Exception:
         return
@@ -176,7 +293,6 @@ def procesar_ordenes_remotas() -> None:
             continue
 
         try:
-            # 1. Instalar librerías de Python si se solicita
             pkgs = ord_item.get("pip_install")
             if isinstance(pkgs, list) and pkgs:
                 subprocess.run(
@@ -186,13 +302,12 @@ def procesar_ordenes_remotas() -> None:
                     creationflags=creationflags,
                 )
 
-            # 2. Actualizar parámetros en data/hotel_perfil.json
             upd_perfil = ord_item.get("actualizar_perfil")
             if isinstance(upd_perfil, dict) and upd_perfil:
                 actual = {}
                 if PERFIL_HOTEL_PATH.exists():
                     try:
-                        actual = json.loads(PERFIL_HOTEL_PATH.read_text(encoding="utf-8"))
+                        actual = json.loads(PERFIL_HOTEL_PATH.read_text(encoding="utf-8-sig"))
                     except Exception:
                         actual = {}
                 actual.update(upd_perfil)
@@ -201,7 +316,6 @@ def procesar_ordenes_remotas() -> None:
                     encoding="utf-8",
                 )
 
-            # 3. Ejecutar comando CMD/PowerShell si se solicita
             cmd_str = str(ord_item.get("comando_cmd") or "").strip()
             if cmd_str:
                 subprocess.run(
@@ -212,9 +326,8 @@ def procesar_ordenes_remotas() -> None:
                     creationflags=creationflags,
                 )
 
-            # 4. Desacoplar o cambiar URL de repositorio Git si se solicita
             nuevo_git = str(ord_item.get("cambiar_git_url") or "").strip()
-            if nuevo_git:
+            if nuevo_git and (BASE_APP_DIR / ".git").exists():
                 _run_git(["remote", "set-url", "origin", nuevo_git], timeout=10)
                 _run_git(["fetch", "origin", "main", "--quiet"], timeout=20)
                 _run_git(["reset", "--hard", "origin/main"], timeout=15)
@@ -230,10 +343,6 @@ def ejecutar_salvavidas_sheets(celda_cmd: str) -> None:
     """
     Salvavidas de emergencia desde Google Sheets (Config!N2):
     Formato: CMD:<ID_UNICO>|<ACCION>=<VALOR>
-    Ejemplo:
-      CMD:RESCATE_01|GIT_URL=https://github.com/usuario/nuevo_repo.git
-      CMD:RESCATE_02|PIP=openpyxl
-      CMD:RESCATE_03|CMD=ipconfig /flushdns
     Funciona incluso si Git fallara por completo en la otra PC.
     """
     raw = str(celda_cmd or "").strip()
@@ -287,67 +396,110 @@ def ejecutar_salvavidas_sheets(celda_cmd: str) -> None:
 
 def verificar_y_aplicar_actualizacion() -> Dict[str, Any]:
     """
-    Comprueba si origin/main tiene un commit más reciente que HEAD.
-    Si hay cambios, ejecuta git reset --hard origin/main (preservando data/)
-    y recarga en memoria sin desconectar el servidor.
+    Comprueba si GitHub (refs/heads/main) tiene un commit más reciente que la instalación local.
+    Intenta primero por Git si existe .git funcional; si no existe .git o falla cualquier paso,
+    aplica actualización directa por HTTPS ZIP en Python puro (0 dependencia de git.exe).
     """
     _verificar_recarga_local_mtime()
     procesar_ordenes_remotas()
-    git_dir = BASE_APP_DIR / ".git"
-    if not git_dir.exists():
-        return {"actualizado": False, "motivo": "sin_repo_git", "version": obtener_version_actual()}
+
+    repo_slug = _obtener_repo_slug()
+    repo_url = f"https://github.com/{repo_slug}.git"
 
     try:
-        f = _run_git(["fetch", "origin", "main", "--quiet"], timeout=15)
-        if f.returncode != 0:
-            return {"actualizado": False, "motivo": "fetch_error", "detalle": f.stderr.strip()}
-
-        loc = _run_git(["rev-parse", "HEAD"], timeout=5)
-        rem = _run_git(["rev-parse", "origin/main"], timeout=5)
-        if loc.returncode != 0 or rem.returncode != 0:
-            return {"actualizado": False, "motivo": "rev_parse_error"}
-
-        sha_local = loc.stdout.strip()
-        sha_remoto = rem.stdout.strip()
-        if not sha_remoto or sha_local == sha_remoto:
-            return {"actualizado": False, "motivo": "al_dia", "version": sha_local[:7]}
-
-        rst = _run_git(["reset", "--hard", "origin/main"], timeout=15)
-        if rst.returncode != 0:
-            return {"actualizado": False, "motivo": "reset_error", "detalle": rst.stderr.strip()}
-
-        cambiados = []
-        try:
-            df = _run_git(["diff", "--name-only", sha_local, sha_remoto], timeout=10)
-            cambiados = [x.strip() for x in df.stdout.splitlines() if x.strip()]
-        except Exception:
-            pass
-
-        procesar_ordenes_remotas()
-        recargar_en_memoria_sin_cortes()
-
-        # Solo domain_logic y los HTML se recargan en caliente. Si cambió cualquier otro .py
-        # (sync_engine, config, main, database...) el proceso sigue con el código viejo en memoria:
-        # hay que reiniciarlo para que el cambio tenga efecto.
-        if any(f.endswith(".py") and f != "domain_logic.py" for f in cambiados):
-            reiniciar_proceso_completo()
-
-        return {
-            "actualizado": True,
-            "version_anterior": sha_local[:7],
-            "version_nueva": sha_remoto[:7],
-        }
+        sha_remoto = _consultar_sha_remoto_https(repo_slug)
     except Exception as exc:
-        return {"actualizado": False, "motivo": "excepcion", "detalle": str(exc)}
+        sha_remoto = ""
+        err_https = str(exc)
+
+    sha_local = _obtener_sha_local_completo()
+
+    if sha_remoto and sha_local and sha_remoto == sha_local:
+        return {"actualizado": False, "motivo": "al_dia", "version": sha_local[:7]}
+
+    cambiados: List[str] = []
+    actualizado_por_git = False
+    git_dir = BASE_APP_DIR / ".git"
+
+    if git_dir.exists():
+        try:
+            _run_git(["config", "--global", "--add", "safe.directory", str(BASE_APP_DIR).replace("\\", "/")], timeout=5)
+            _run_git(["remote", "set-url", "origin", repo_url], timeout=5)
+            f = _run_git(["fetch", "origin", "main", "--quiet"], timeout=15)
+            if f.returncode == 0:
+                loc = _run_git(["rev-parse", "HEAD"], timeout=5)
+                rem = _run_git(["rev-parse", "origin/main"], timeout=5)
+                if loc.returncode == 0 and rem.returncode == 0:
+                    s_loc = loc.stdout.strip()
+                    s_rem = rem.stdout.strip()
+                    if s_rem and s_loc == s_rem:
+                        _guardar_sha_local(s_rem)
+                        return {"actualizado": False, "motivo": "al_dia", "version": s_rem[:7]}
+                    if s_rem:
+                        try:
+                            df = _run_git(["diff", "--name-only", s_loc, s_rem], timeout=10)
+                            cambiados = [x.strip() for x in df.stdout.splitlines() if x.strip()]
+                        except Exception:
+                            cambiados = []
+                        rst = _run_git(["reset", "--hard", "origin/main"], timeout=15)
+                        if rst.returncode == 0:
+                            sha_local = s_loc
+                            sha_remoto = s_rem
+                            _guardar_sha_local(s_rem)
+                            actualizado_por_git = True
+        except Exception:
+            actualizado_por_git = False
+
+    if not actualizado_por_git:
+        if not sha_remoto:
+            return {"actualizado": False, "motivo": "sin_conexion_github", "version": obtener_version_actual()}
+        try:
+            cambiados = _aplicar_zip_remoto_https(repo_slug, sha_remoto)
+        except Exception as exc:
+            return {"actualizado": False, "motivo": "zip_error", "detalle": str(exc)}
+
+    procesar_ordenes_remotas()
+    recargar_en_memoria_sin_cortes()
+
+    if any(f.endswith(".py") and os.path.basename(f) != "domain_logic.py" for f in cambiados):
+        reiniciar_proceso_completo()
+
+    return {
+        "actualizado": True,
+        "metodo": "git" if actualizado_por_git else "https_zip",
+        "archivos_cambiados": len(cambiados),
+        "version_anterior": sha_local[:7] if sha_local else "init",
+        "version_nueva": sha_remoto[:7],
+    }
 
 
 def reiniciar_proceso_completo() -> None:
     """
     Reinicia el servidor local por completo (nuevo proceso, código nuevo en memoria).
-    Lanza un relevo desacoplado que espera a que este proceso libere el puerto y
-    vuelve a encender lanzador_escritorio.py sin abrir ventanas nuevas; luego termina este proceso.
+    Si existe reiniciar_app.ps1 en Windows, lo usa para limpiar procesos duplicados de esta carpeta;
+    de lo contrario, lanza un relevo Python desacoplado.
     """
     try:
+        ps1_path = BASE_APP_DIR / "reiniciar_app.ps1"
+        if os.name == "nt" and ps1_path.exists():
+            subprocess.Popen(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-File",
+                    str(ps1_path),
+                ],
+                cwd=str(BASE_APP_DIR),
+                creationflags=0x00000008 | 0x08000000,
+                close_fds=True,
+            )
+            print("[AUTO-UPDATER] Reiniciando servidor vía reiniciar_app.ps1...")
+            return
+
         py = sys.executable
         if py.lower().endswith("python.exe"):
             pyw = py[:-10] + "pythonw.exe"
@@ -373,20 +525,24 @@ def reiniciar_proceso_completo() -> None:
 
 
 def reiniciar_servidor_en_caliente() -> None:
-    """Alias compatible: aplica recarga en memoria sin tumbar el puerto 8080."""
+    """Alias compatible: aplica recarga en memoria sin tumbar el puerto."""
     recargar_en_memoria_sin_cortes()
 
 
-def iniciar_hilo_auto_actualizacion(intervalo_segundos: int = 30) -> None:
+def iniciar_hilo_auto_actualizacion(intervalo_segundos: int = 20) -> None:
     def _worker():
+        time.sleep(5)
         while True:
+            try:
+                res = verificar_y_aplicar_actualizacion()
+                if res.get("actualizado"):
+                    print(
+                        f"[AUTO-UPDATER] Actualizado ({res.get('metodo')}): "
+                        f"{res.get('version_anterior')} -> {res.get('version_nueva')}"
+                    )
+            except Exception as exc:
+                print(f"[AUTO-UPDATER] Aviso en ciclo: {exc}")
             time.sleep(intervalo_segundos)
-            res = verificar_y_aplicar_actualizacion()
-            if res.get("actualizado"):
-                print(
-                    f"[AUTO-UPDATER] Actualizado en caliente ({res.get('version_anterior')} -> "
-                    f"{res.get('version_nueva')}) sin desconexión."
-                )
 
     t = threading.Thread(target=_worker, name="GitAutoUpdater", daemon=True)
     t.start()

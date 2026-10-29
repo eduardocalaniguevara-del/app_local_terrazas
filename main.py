@@ -115,7 +115,7 @@ async def lifespan(app: FastAPI):
     init_db()
     worker = threading.Thread(target=_background_sync_worker, name="OvaloSyncWorker", daemon=True)
     worker.start()
-    iniciar_hilo_auto_actualizacion(intervalo_segundos=45)
+    iniciar_hilo_auto_actualizacion(intervalo_segundos=20)
     yield
     _sync_stop_event.set()
     _sync_wakeup_event.set()
@@ -296,7 +296,10 @@ def _obtener_vista_formulario_local(nombre_vista: str) -> str:
 def index():
     panel_path = STATIC_DIR / "PanelDisponibilidad.html"
     html = panel_path.read_text(encoding="utf-8")
+    mtime_ui = int(panel_path.stat().st_mtime)
     html = html.replace("{{NOMBRE_HOTEL}}", NOMBRE_HOTEL)
+    html = html.replace('/static/js/api_bridge.js"', f'/static/js/api_bridge.js?v={mtime_ui}"')
+    html = html.replace('/static/js/facturacion_sunat.js"', f'/static/js/facturacion_sunat.js?v={mtime_ui}"')
     return HTMLResponse(
         content=html,
         media_type="text/html; charset=utf-8",
@@ -312,7 +315,10 @@ def api_sync_status():
         st["uiVersion"] = f"{obtener_version_actual()}-{mtime}"
     except Exception:
         st["uiVersion"] = obtener_version_actual()
-    return st
+    return JSONResponse(
+        content=st,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 @app.post("/api/system/update")
