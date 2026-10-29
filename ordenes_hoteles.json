@@ -1,4 +1,4 @@
-﻿{
+{
   "_instrucciones": "Puerta de mando remota por hotel (target: 'Terrazas', 'Ovalo' o 'todos'). Soporta: pip_install, actualizar_perfil, comando_cmd, cambiar_git_url.",
   "ordenes": [
     {
@@ -10,6 +10,11 @@
       "id": "REINICIAR_TERRAZAS_48HABS_03",
       "target": "terrazas",
       "comando_cmd": "powershell -NoProfile -ExecutionPolicy Bypass -File reiniciar_app.ps1"
+    },
+    {
+      "id": "VERIFICAR_SALUD_TERRAZAS_05",
+      "target": "terrazas",
+      "comando_cmd": "powershell -NoProfile -ExecutionPolicy Bypass -File check_salud.ps1"
     }
   ]
 }

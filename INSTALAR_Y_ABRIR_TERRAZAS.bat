@@ -43,7 +43,7 @@ if exist "C:\Program Files\Git\cmd\git.exe" (
     goto git_listo
 )
 echo [2/5] Descargando motor de auto-actualizacion (Git portable)...
-powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '%GIT_DIR%' | Out-Null; Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/MinGit-2.47.1-64-bit.zip' -OutFile '%GIT_DIR%\mingit.zip'; Expand-Archive -Path '%GIT_DIR%\mingit.zip' -DestinationPath '%GIT_DIR%' -Force; Remove-Item '%GIT_DIR%\mingit.zip' -Force"
+powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; New-Item -ItemType Directory -Force -Path '%GIT_DIR%' | Out-Null; Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/MinGit-2.47.1-64-bit.zip' -OutFile '%GIT_DIR%\mingit.zip'; Expand-Archive -Path '%GIT_DIR%\mingit.zip' -DestinationPath '%GIT_DIR%' -Force; Remove-Item '%GIT_DIR%\mingit.zip' -Force"
 
 :git_listo
 echo [2/5] Motor Git listo: %GIT_EXE%
