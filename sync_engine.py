@@ -122,9 +122,9 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
         tabs = _get_sheet_tabs(sh)
 
         ranges_step1 = [
-            "'Config'!A2:N40",
+            "'Config'!A2:N150",
             "'Panel_Disponibilidad'!D1:G1",
-            "'Panel_Disponibilidad'!A3:D31",
+            "'Panel_Disponibilidad'!A3:D150",
             "'Registro_Estancias'!A:A",
             "'2.Registro_Ventas_Tienda'!A:A",
             "'Registro_Pagos'!A:A",
@@ -275,18 +275,49 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
                 if hot_ap:
                     conn.execute("INSERT OR REPLACE INTO catalogos_local (categoria, clave, valor, orden) VALUES ('HOTEL_APOYO', ?, '', ?)", (hot_ap, idx_c))
 
-            # Habitaciones de Panel_Disponibilidad!A3:D31
-            ultimo_precio_ref = ""
-            habs_validas: List[str] = []
-            for idx_p, r in enumerate(panel_rows):
-                hab_num = str(r[1]).strip() if len(r) > 1 and r[1] else ""
-                if not hab_num:
+            # Habitaciones: lista maestra = Config!A (Lista_Habitaciones) + Config!B (Tipo).
+            # Sin límite fijo de filas (Óvalo 29, Terrazas 48...). Panel_Disponibilidad aporta
+            # el precio de referencia (col A) y el orden visual; los precios numéricos agrupados
+            # (ej. "75-65") se heredan hacia abajo, las etiquetas de texto ("DF2", "DOBLE") no.
+            precio_por_hab: Dict[str, str] = {}
+            tipo_panel_por_hab: Dict[str, str] = {}
+            orden_panel: List[str] = []
+            ultimo_precio_num = ""
+            for r in panel_rows:
+                h_p = str(r[1]).strip() if len(r) > 1 and r[1] else ""
+                if not h_p:
                     continue
-                habs_validas.append(hab_num)
+                orden_panel.append(h_p)
                 p_celda = str(r[0]).strip() if len(r) > 0 and r[0] else ""
-                if p_celda:
-                    ultimo_precio_ref = p_celda
-                tipo_h = str(r[3]).strip() if len(r) > 3 and r[3] else ""
+                if p_celda and re.match(r"^\d+(\.\d+)?(\s*-\s*\d+(\.\d+)?)?$", p_celda):
+                    ultimo_precio_num = p_celda
+                    precio_por_hab[h_p] = p_celda
+                elif p_celda:
+                    precio_por_hab[h_p] = p_celda
+                else:
+                    precio_por_hab[h_p] = ultimo_precio_num
+                tipo_panel_por_hab[h_p] = str(r[3]).strip() if len(r) > 3 and r[3] else ""
+
+            tipo_cfg_por_hab: Dict[str, str] = {}
+            orden_cfg: List[str] = []
+            for r in cfg_rows:
+                h_c = str(r[0]).strip() if len(r) > 0 and r[0] else ""
+                if not h_c or h_c.lower().startswith("lista"):
+                    continue
+                if h_c not in tipo_cfg_por_hab:
+                    orden_cfg.append(h_c)
+                tipo_cfg_por_hab[h_c] = str(r[1]).strip() if len(r) > 1 and r[1] else ""
+
+            habs_ordenadas: List[str] = list(orden_panel)
+            for h_c in orden_cfg:
+                if h_c not in habs_ordenadas:
+                    habs_ordenadas.append(h_c)
+
+            habs_validas: List[str] = []
+            for idx_p, hab_num in enumerate(habs_ordenadas):
+                habs_validas.append(hab_num)
+                tipo_h = tipo_panel_por_hab.get(hab_num) or tipo_cfg_por_hab.get(hab_num, "")
+                ultimo_precio_ref = precio_por_hab.get(hab_num, "")
 
                 conn.execute(
                     """

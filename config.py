@@ -34,7 +34,7 @@ _PERFIL_TERRAZAS = {
     "app_port": 8081,
 }
 
-_ES_CARPETA_TERRAZAS = True # "terrazas" in str(BASE_APP_DIR).lower()
+_ES_CARPETA_TERRAZAS = True
 _DEFAULT_PERFIL = dict(_PERFIL_TERRAZAS if _ES_CARPETA_TERRAZAS else _PERFIL_OVALO)
 
 
