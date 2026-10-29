@@ -461,7 +461,16 @@ def verificar_y_aplicar_actualizacion() -> Dict[str, Any]:
     procesar_ordenes_remotas()
     recargar_en_memoria_sin_cortes()
 
-    if any(f.endswith(".py") and os.path.basename(f) != "domain_logic.py" for f in cambiados):
+    core_py = {
+        "main.py",
+        "sync_engine.py",
+        "config.py",
+        "database.py",
+        "auto_updater.py",
+        "lanzador_escritorio.py",
+        "sunat_wsp_service.py",
+    }
+    if any(os.path.basename(f) in core_py for f in cambiados):
         reiniciar_proceso_completo()
 
     return {
@@ -494,7 +503,7 @@ def reiniciar_proceso_completo() -> None:
                     str(ps1_path),
                 ],
                 cwd=str(BASE_APP_DIR),
-                creationflags=0x00000008 | 0x08000000,
+                creationflags=subprocess.CREATE_NO_WINDOW,
                 close_fds=True,
             )
             print("[AUTO-UPDATER] Reiniciando servidor vía reiniciar_app.ps1...")

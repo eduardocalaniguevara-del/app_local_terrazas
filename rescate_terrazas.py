@@ -201,7 +201,7 @@ def main() -> None:
                 str(ps1_path),
             ],
             cwd=str(BASE_DIR),
-            creationflags=0x00000008 | 0x08000000,
+            creationflags=subprocess.CREATE_NO_WINDOW,
             close_fds=True,
         )
 
