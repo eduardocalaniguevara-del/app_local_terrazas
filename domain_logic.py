@@ -25,6 +25,9 @@ import threading as _threading
 try:
     if "config" in _sys.modules:
         _il.reload(_sys.modules["config"])
+    if "database" in _sys.modules:
+        _il.reload(_sys.modules["database"])
+        _sys.modules["database"].init_db()
 except Exception:
     pass
 
@@ -35,7 +38,12 @@ from config import (
     NOMBRE_HOTEL,
     SPREADSHEET_ID,
 )
-from database import db_transaction, get_connection
+from database import db_transaction, get_connection, init_db
+
+try:
+    init_db()
+except Exception:
+    pass
 
 try:
     from config import BASE_APP_DIR as _BAD
@@ -48,10 +56,14 @@ try:
         setattr(_se_mod, "COL_TIPO_ADICIONAL", COL_TIPO_ADICIONAL)
         setattr(_se_mod, "COL_TIPO_ADICIONAL_IDX", COL_TIPO_ADICIONAL_IDX)
         setattr(_se_mod, "FORMULA_SNACKS_EN_S2", FORMULA_SNACKS_EN_S2)
-        if _old_sh_id != SPREADSHEET_ID and hasattr(_se_mod, "_reset_client"):
+        try:
+            _il.reload(_se_mod)
+        except Exception:
+            pass
+        if hasattr(_se_mod, "_reset_client") and _old_sh_id != SPREADSHEET_ID:
             _se_mod._reset_client()
-            if hasattr(_se_mod, "pull_from_sheets"):
-                _threading.Thread(target=_se_mod.pull_from_sheets, kwargs={"full_bootstrap": False}, daemon=True).start()
+        if hasattr(_se_mod, "pull_from_sheets"):
+            _threading.Thread(target=_se_mod.pull_from_sheets, kwargs={"full_bootstrap": False}, daemon=True).start()
     if "terrazas" in str(_BAD).lower() and "auto_updater" in _sys.modules:
         _au_mod = _sys.modules["auto_updater"]
         if hasattr(_au_mod, "_run_git"):
@@ -3810,6 +3822,10 @@ def _fmt_num_stock(val: float) -> Any:
 
 
 def obtener_datos_vitrina_local() -> Dict[str, Any]:
+    try:
+        init_db()
+    except Exception:
+        pass
     conn = get_connection()
     try:
         # 1. Ventas locales de tienda aún no sincronizadas (synced = 0) para restar al stock de Sheets en vivo (0 ms)
@@ -6078,3 +6094,197 @@ def eliminar_pago_bd_admin_local(datos: Dict[str, Any]) -> Dict[str, Any]:
         )
 
     return {"ok": True, "pagoId": pid}
+
+
+# ==============================================================================
+# AUTO-INYECCIÓN EN CALIENTE DE RUTAS RPC PARA PROCESOS EN EJECUCIÓN SIN REINICIO
+# ==============================================================================
+def _inyectar_rutas_en_servidor_activo() -> None:
+    try:
+        import domain_logic as _dl_self
+        from sunat_wsp_service import consultar_dni_local_o_reniec, consultar_ruc_local_o_sunat
+        from fastapi import HTTPException
+        from fastapi.responses import FileResponse
+
+        for mod_name in ("main", "__main__"):
+            m = _sys.modules.get(mod_name)
+            if not m or not hasattr(m, "app"):
+                continue
+            app_inst = getattr(m, "app")
+            if hasattr(m, "WRITE_METHODS") and isinstance(m.WRITE_METHODS, set):
+                m.WRITE_METHODS.update({
+                    "editarEstanciaBDAdmin", "eliminarEstanciaBDAdmin",
+                    "editarGastoBDAdmin", "eliminarGastoBDAdmin",
+                    "editarVentaTiendaBDAdmin", "eliminarVentaTiendaBDAdmin",
+                    "editarPagoBDAdmin", "eliminarPagoBDAdmin",
+                    "marcarAsistenciaHorario", "editarCeldaHorario",
+                    "guardarPersonalConfig", "guardarLiquidacionHorario",
+                    "guardarConteoVitrina", "registrarCompraTienda",
+                    "cerrarCompraPendienteTienda", "registrarMovimientoTienda",
+                    "anularMovimientoAlmacen", "guardarCheckInGrupalEmpresa",
+                    "guardarPagoMasivo",
+                })
+
+            # Asegurar ruta /api/cuentas/pdf si el proceso era del 28/10
+            rutas_existentes = { getattr(r, "path", "") for r in getattr(app_inst, "routes", []) }
+            if "/api/cuentas/pdf" not in rutas_existentes:
+                @app_inst.get("/api/cuentas/pdf")
+                def _hot_pdf_cuenta(hab: str = "", modo: str = "ingreso", fecha: str = "", estanciaUuid: str = ""):
+                    import pases_logic as pl
+                    pdf_path = pl.generar_pdf_cuenta_hab_local({"hab": hab, "modo": modo, "fecha": fecha, "estanciaUuid": estanciaUuid})
+                    return FileResponse(str(pdf_path), media_type="application/pdf", filename=pdf_path.name, headers={"Cache-Control": "no-store"})
+
+            # Reemplazar el endpoint /api/rpc/{method_name} en la tabla de rutas de FastAPI en vivo
+            def _nuevo_rpc_handler(method_name: str, body: Any):
+                args = getattr(body, "args", None) or []
+                try:
+                    if method_name in ("obtenerDatosPanelDisponibilidad", "cambiarFechaPanelDisponibilidad"):
+                        res = _dl_self.obtener_datos_panel_local(args[0] if len(args) > 0 and args[0] else None)
+                    elif method_name == "obtenerVistaFormulario":
+                        res = m._obtener_vista_formulario_local(args[0] if args else "")
+                    elif method_name == "obtenerDatosInicialesCheckIn":
+                        res = _dl_self.obtener_datos_iniciales_checkin_local()
+                    elif method_name in ("consultarDniReniec", "consultarDocumentoPadron"):
+                        res = consultar_dni_local_o_reniec(args[0] if args else "")
+                    elif method_name in ("consultarRucSunat", "consultarRucPadron"):
+                        res = consultar_ruc_local_o_sunat(args[0] if args else "")
+                    elif method_name in ("guardarCheckInDesdeApp", "procesarCheckInApp"):
+                        res = _dl_self.guardar_checkin_local(args[0] if args else {})
+                    elif method_name in ("obtenerDatosPagosPosteriores", "obtenerEstanciasConDeuda"):
+                        res = _dl_self.obtener_datos_pagos_posteriores_local()
+                    elif method_name in ("guardarPagoPosteriorDesdeApp", "procesarPagoPosteriorApp"):
+                        res = _dl_self.guardar_pago_posterior_local(args[0] if args else {})
+                    elif method_name == "obtenerDatosTienda":
+                        res = _dl_self.obtener_datos_tienda_local()
+                    elif method_name in ("guardarVentaTiendaDesdeApp", "procesarVentaTiendaApp"):
+                        res = _dl_self.guardar_venta_tienda_local(args[0] if args else {})
+                    elif method_name == "obtenerDatosGastos":
+                        res = _dl_self.obtener_datos_gastos_local()
+                    elif method_name in ("guardarGastoDesdeApp", "procesarGastoApp"):
+                        res = _dl_self.guardar_gasto_local(args[0] if args else {})
+                    elif method_name in ("continuarEstanciaDesdeApp", "continuarEstanciaRapida"):
+                        res = _dl_self.continuar_estancia_local(args[0] if args else "")
+                    elif method_name == "liberarHabitacionDesdeApp":
+                        res = _dl_self.liberar_habitacion_local(args[0] if args else {})
+                    elif method_name == "cancelarEstanciaDesdeApp":
+                        res = _dl_self.cancelar_estancia_local(args[0] if args else {})
+                    elif method_name == "restaurarEstanciaDesdeApp":
+                        res = _dl_self.restaurar_estancia_local(args[0] if args else {})
+                    elif method_name == "obtenerEstanciaParaModificar":
+                        res = _dl_self.obtener_estancia_para_modificar_local(args[0] if len(args) > 0 else "", args[1] if len(args) > 1 else None)
+                    elif method_name in ("modificarEstanciaDesdeApp", "guardarModificacionEstancia"):
+                        res = _dl_self.modificar_estancia_local(args[0] if args else {})
+                    elif method_name == "actualizarEstadoComprobanteDesdePanel":
+                        res = _dl_self.actualizar_comprobante_desde_panel_local(args[0] if args else {})
+                    elif method_name == "obtenerRegistroPagos":
+                        res = _dl_self.obtener_registro_pagos_local(args[0] if args else {})
+                    elif method_name == "obtenerMovimientos":
+                        res = _dl_self.obtener_movimientos_local(args[0] if args else {})
+                    elif method_name == "obtenerEstanciasBD":
+                        res = _dl_self.obtener_estancias_bd_local(args[0] if args else {})
+                    elif method_name == "verificarClaveAdminBD":
+                        res = _dl_self.verificar_clave_admin_bd_local(args[0] if args else {})
+                    elif method_name == "editarEstanciaBDAdmin":
+                        res = _dl_self.editar_estancia_bd_admin_local(args[0] if args else {})
+                    elif method_name == "eliminarEstanciaBDAdmin":
+                        res = _dl_self.eliminar_estancia_bd_admin_local(args[0] if args else {})
+                    elif method_name == "obtenerGastosBD":
+                        res = _dl_self.obtener_gastos_bd_local(args[0] if args else {})
+                    elif method_name == "editarGastoBDAdmin":
+                        res = _dl_self.editar_gasto_bd_admin_local(args[0] if args else {})
+                    elif method_name == "eliminarGastoBDAdmin":
+                        res = _dl_self.eliminar_gasto_bd_admin_local(args[0] if args else {})
+                    elif method_name == "obtenerVentasTiendaBD":
+                        res = _dl_self.obtener_ventas_tienda_bd_local(args[0] if args else {})
+                    elif method_name == "editarVentaTiendaBDAdmin":
+                        res = _dl_self.editar_venta_tienda_bd_admin_local(args[0] if args else {})
+                    elif method_name == "eliminarVentaTiendaBDAdmin":
+                        res = _dl_self.eliminar_venta_tienda_bd_admin_local(args[0] if args else {})
+                    elif method_name == "obtenerPagosBD":
+                        res = _dl_self.obtener_pagos_bd_local(args[0] if args else {})
+                    elif method_name == "editarPagoBDAdmin":
+                        res = _dl_self.editar_pago_bd_admin_local(args[0] if args else {})
+                    elif method_name == "eliminarPagoBDAdmin":
+                        res = _dl_self.eliminar_pago_bd_admin_local(args[0] if args else {})
+                    elif method_name == "guardarColorFondoHabitacion":
+                        res = _dl_self.guardar_color_habitacion_local(
+                            args[0] if len(args) > 0 else "",
+                            args[1] if len(args) > 1 else "",
+                            args[2] if len(args) > 2 else None,
+                            args[3] if len(args) > 3 else "",
+                        )
+                    elif method_name == "obtenerDatosVitrina":
+                        res = _dl_self.obtener_datos_vitrina_local()
+                    elif method_name == "guardarConteoVitrina":
+                        res = _dl_self.guardar_conteo_vitrina_local(args[0] if args else {})
+                    elif method_name == "verificarClaveGestionTienda":
+                        res = _dl_self.verificar_clave_gestion_tienda_local(args[0] if args else {})
+                    elif method_name == "registrarCompraTienda":
+                        res = _dl_self.registrar_compra_tienda_local(args[0] if args else {})
+                    elif method_name == "cerrarCompraPendienteTienda":
+                        res = _dl_self.cerrar_compra_pendiente_tienda_local(args[0] if args else {})
+                    elif method_name == "registrarMovimientoTienda":
+                        res = _dl_self.registrar_movimiento_tienda_local(args[0] if args else {})
+                    elif method_name == "anularMovimientoAlmacen":
+                        res = _dl_self.anular_movimiento_almacen_local(args[0] if args else {})
+                    elif method_name == "obtenerHorarioMes":
+                        import horario_logic as hl
+                        res = hl.obtener_horario_mes_local(args[0] if args else {})
+                    elif method_name == "marcarAsistenciaHorario":
+                        import horario_logic as hl
+                        res = hl.marcar_asistencia_local(args[0] if args else {})
+                    elif method_name == "editarCeldaHorario":
+                        import horario_logic as hl
+                        res = hl.editar_celda_horario_local(args[0] if args else {})
+                    elif method_name == "verificarClaveCuentasHorario":
+                        import horario_logic as hl
+                        res = hl.verificar_clave_cuentas_horario_local(args[0] if args else {})
+                    elif method_name == "obtenerLiquidacionHorario":
+                        import horario_logic as hl
+                        res = hl.obtener_liquidacion_horario_local(args[0] if args else {})
+                    elif method_name == "obtenerAuditoriaHorario":
+                        import horario_logic as hl
+                        res = hl.obtener_auditoria_horario_local(args[0] if args else {})
+                    elif method_name == "obtenerPersonalConfig":
+                        import horario_logic as hl
+                        res = hl.obtener_personal_config_local(args[0] if args else {})
+                    elif method_name == "guardarPersonalConfig":
+                        import horario_logic as hl
+                        res = hl.guardar_personal_config_local(args[0] if args else {})
+                    elif method_name == "guardarLiquidacionHorario":
+                        import horario_logic as hl
+                        res = hl.guardar_liquidacion_horario_local(args[0] if args else {})
+                    elif method_name == "guardarCheckInGrupalEmpresa":
+                        res = _dl_self.guardar_checkin_grupal_empresa_local(args[0] if args else {})
+                    elif method_name == "obtenerEstanciasPagoMasivo":
+                        res = _dl_self.obtener_estancias_pago_masivo_local(args[0] if args else {})
+                    elif method_name == "guardarPagoMasivo":
+                        res = _dl_self.guardar_pago_masivo_local(args[0] if args else {})
+                    elif method_name == "obtenerCuentaDetalladaHab":
+                        import pases_logic as pl
+                        res = pl.obtener_cuenta_detallada_hab_local(args[0] if args else {})
+                    else:
+                        raise HTTPException(status_code=404, detail=f"Método RPC no soportado: {method_name}")
+
+                    if hasattr(m, "WRITE_METHODS") and method_name in m.WRITE_METHODS and hasattr(m, "_sync_wakeup_event"):
+                        m._sync_wakeup_event.set()
+
+                    sync_st = _dl_self.obtener_estado_red_cola()
+                    if isinstance(res, dict) and "syncStatus" not in res:
+                        res["syncStatus"] = sync_st
+                    return {"result": res, "syncStatus": sync_st}
+                except HTTPException:
+                    raise
+                except Exception as exc:
+                    raise HTTPException(status_code=400, detail=str(exc))
+
+            for r in getattr(app_inst, "routes", []):
+                if getattr(r, "path", "") == "/api/rpc/{method_name}":
+                    r.endpoint = _nuevo_rpc_handler
+                    if hasattr(r, "dependant") and hasattr(r.dependant, "call"):
+                        r.dependant.call = _nuevo_rpc_handler
+    except Exception:
+        pass
+
+
+_inyectar_rutas_en_servidor_activo()
