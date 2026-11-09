@@ -98,6 +98,26 @@ MAPA_COLORES_FUERTES = {
 }
 
 
+def _canon_ts_id(v: Any) -> str:
+    """Normaliza timestamps '2/11/2026 9:32:00' -> '02/11/2026 09:32:00' para cruce exacto Local <-> Sheets."""
+    s = str(v or "").strip()
+    if not s:
+        return ""
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?(.*)$", s)
+    if m:
+        dd, mm, yy = int(m.group(1)), int(m.group(2)), m.group(3)
+        if len(yy) == 2:
+            yy = "20" + yy
+        tail = m.group(7) or ""
+        if m.group(4) is not None:
+            hh = int(m.group(4))
+            mi = int(m.group(5) or 0)
+            ss = int(m.group(6) or 0)
+            return f"{dd:02d}/{mm:02d}/{yy} {hh:02d}:{mi:02d}:{ss:02d}{tail}"
+        return f"{dd:02d}/{mm:02d}/{yy}{tail}"
+    return s
+
+
 # ==============================================================================
 # 1. PULL / BOOTSTRAP DESDE GOOGLE SHEETS (100% SOLO LECTURA)
 # ==============================================================================
@@ -142,6 +162,18 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
         if "Vitrina_Tienda" in tabs:
             ranges_step1.append("'Vitrina_Tienda'!A2:M45")
             keys_step1.append("vitrina")
+        if "import_Almacen" in tabs:
+            ranges_step1.append("'import_Almacen'!A2:J3000")
+            keys_step1.append("almacen")
+        if "import_Horario" in tabs:
+            ranges_step1.append("'import_Horario'!A2:L8000")
+            keys_step1.append("horario")
+        if "import_Horario_Audit" in tabs:
+            ranges_step1.append("'import_Horario_Audit'!A2:H6000")
+            keys_step1.append("horario_audit")
+        if "import_Control_Pases" in tabs:
+            ranges_step1.append("'import_Control_Pases'!A2:N8000")
+            keys_step1.append("control_pases")
 
         res_step1 = sh.values_batch_get(ranges_step1)
         vrs1 = res_step1.get("valueRanges", []) if isinstance(res_step1, dict) else []
@@ -169,6 +201,11 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
         col_pg = step1_dict.get("col_pg", [])
         col_g = step1_dict.get("col_g", [])
         vitrina_rows = step1_dict.get("vitrina", [])
+        almacen_rows = step1_dict.get("almacen", [])
+        almacen_rows = step1_dict.get("almacen", [])
+        horario_rows = step1_dict.get("horario", [])
+        horario_audit_rows = step1_dict.get("horario_audit", [])
+        control_pases_rows = step1_dict.get("control_pases", [])
 
         total_rows_bd = max(len(col_a_bd), 1)
         last_t = len(col_t)
@@ -186,14 +223,14 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
             ws_bd = sh.worksheet("Registro_Estancias")
             all_bd_values = ws_bd.get_all_values()
             total_rows_bd = len(all_bd_values)
-            start_row_recent = max(2, total_rows_bd - 650 + 1)
-            recent_bd_rows = all_bd_values[start_row_recent - 1:]
+            start_row_recent = 2
+            recent_bd_rows = all_bd_values[1:]
         else:
             start_row_recent = max(2, total_rows_bd - 550 + 1)
 
-        st_t = max(2, last_t - 250 + 1)
-        st_pg = max(2, last_pg - 900 + 1)
-        st_g = max(2, last_g - 120 + 1)
+        st_t = 2 if (full_bootstrap or last_t <= 5000) else max(2, last_t - 1500 + 1)
+        st_pg = 2 if (full_bootstrap or last_pg <= 5000) else max(2, last_pg - 1500 + 1)
+        st_g = 2 if (full_bootstrap or last_g <= 4000) else max(2, last_g - 1500 + 1)
 
         ranges_step2 = []
         keys_step2 = []
@@ -207,7 +244,7 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
             ranges_step2.append(f"'Registro_Pagos'!A{st_pg}:J{last_pg}")
             keys_step2.append("pagos")
         if last_g >= 2:
-            ranges_step2.append(f"'Registro_Gastos'!A{st_g}:I{last_g}")
+            ranges_step2.append(f"'Registro_Gastos'!A{st_g}:J{last_g}")
             keys_step2.append("gastos")
 
         if ranges_step2:
@@ -238,6 +275,7 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
                 conn.execute("DELETE FROM sunat_lineas_cache")
                 conn.execute("DELETE FROM calzado_cache")
                 conn.execute("DELETE FROM vitrina_local")
+                conn.execute("DELETE FROM almacen_movimientos WHERE synced = 1")
                 _set_estado_sistema(conn, "spreadsheet_id_activo", SPREADSHEET_ID)
 
             _set_estado_sistema(conn, "caja_sheets_g1", caja_g1)
@@ -247,6 +285,8 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
             _set_estado_sistema(conn, "offline_since_iso", "")
             _set_estado_sistema(conn, "last_sync_error", "")
             _set_estado_sistema(conn, "last_row_estancias", str(total_rows_bd))
+            if full_bootstrap:
+                _set_estado_sistema(conn, "bootstrap_full_v2", "1")
 
             # Catálogos de Config
             conn.execute("DELETE FROM catalogos_local")
@@ -408,8 +448,12 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
                         (ruc_k, rs_v, ahora_iso),
                     )
 
-            # Actualizar ventana reciente de estancias (respetando dirty = 1)
+            # Actualizar ventana reciente de estancias (respetando dirty = 1 y normalizando timestamps)
+            pend_est_ops = conn.execute(
+                "SELECT 1 FROM sync_queue WHERE op_type IN ('CHECKIN', 'CONTINUAR', 'ELIMINAR_ESTANCIA_ADMIN') AND status != 'SYNCED' LIMIT 1"
+            ).fetchone()
             ts_en_sheets = set()
+            seen_raw_bd = set()
             for offset, r in enumerate(recent_bd_rows):
                 sheet_row_num = start_row_recent + offset
                 if not r or len(r) < 12:
@@ -421,12 +465,32 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
                 def _g(idx_col: int) -> str:
                     return str(r[idx_col]).strip() if len(r) > idx_col and r[idx_col] is not None else ""
 
-                id_ts_val = _g(0) or f"ROW-{sheet_row_num}"
+                raw_ts_a = _g(0) or f"ROW-{sheet_row_num}"
+                canon_ts_a = _canon_ts_id(raw_ts_a)
+                es_repetido_bd = canon_ts_a in seen_raw_bd
+                seen_raw_bd.add(canon_ts_a)
+
+                existing = None
+                if not es_repetido_bd:
+                    existing = conn.execute(
+                        "SELECT estancia_uuid, id_timestamp_str, dirty, parent_uuid FROM estancias WHERE id_timestamp_str IN (?, ?) LIMIT 1",
+                        (raw_ts_a, canon_ts_a),
+                    ).fetchone()
+                else:
+                    id_disamb = f"{raw_ts_a} #{sheet_row_num}"
+                    existing = conn.execute(
+                        "SELECT estancia_uuid, id_timestamp_str, dirty, parent_uuid FROM estancias WHERE id_timestamp_str = ? OR (sheet_row = ? AND hab = ?) LIMIT 1",
+                        (id_disamb, sheet_row_num, hab_r),
+                    ).fetchone()
+
+                if existing and existing["id_timestamp_str"] not in ts_en_sheets:
+                    id_ts_val = existing["id_timestamp_str"]
+                elif es_repetido_bd:
+                    id_ts_val = f"{raw_ts_a} #{sheet_row_num}"
+                else:
+                    id_ts_val = canon_ts_a
+
                 ts_en_sheets.add(id_ts_val)
-                existing = conn.execute(
-                    "SELECT estancia_uuid, dirty, parent_uuid FROM estancias WHERE id_timestamp_str = ? LIMIT 1",
-                    (id_ts_val,),
-                ).fetchone()
 
                 if existing and int(existing["dirty"] or 0) == 1:
                     # No sobrescribir cambios locales pendientes de subir
@@ -534,15 +598,42 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
                     (_g(COL_TIPO_ADICIONAL_IDX), id_ts_val),
                 )
 
-            # Limpiar estancias obsoletas eliminadas en Sheets dentro de la ventana reciente
-            if ts_en_sheets:
+            # Limpiar en espejo estancias eliminadas en Registro_Estancias (ventana reciente + histórico por Col A)
+            if not pend_est_ops:
                 stale_recs = conn.execute(
-                    "SELECT id_timestamp_str FROM estancias WHERE dirty = 0 AND sheet_row >= ? AND sheet_row <= ?",
-                    (start_row_recent, total_rows_bd),
+                    "SELECT estancia_uuid, id_timestamp_str FROM estancias WHERE dirty = 0 AND sheet_row >= ?",
+                    (start_row_recent,),
                 ).fetchall()
                 for st_r in stale_recs:
                     if st_r["id_timestamp_str"] not in ts_en_sheets:
-                        conn.execute("DELETE FROM estancias WHERE id_timestamp_str = ?", (st_r["id_timestamp_str"],))
+                        conn.execute("DELETE FROM estancias WHERE estancia_uuid = ?", (st_r["estancia_uuid"],))
+
+                if col_a_bd and len(col_a_bd) >= 1:
+                    canon_all_bd = set()
+                    canon_hist_row: Dict[str, int] = {}
+                    canon_hist_dup = set()
+                    for idx_ca, x in enumerate(col_a_bd[1:], start=2):
+                        if x and str(x[0]).strip():
+                            ck_bd = _canon_ts_id(x[0])
+                            canon_all_bd.add(ck_bd)
+                            if idx_ca < start_row_recent:
+                                if ck_bd in canon_hist_row:
+                                    canon_hist_dup.add(ck_bd)
+                                else:
+                                    canon_hist_row[ck_bd] = idx_ca
+                    old_recs = conn.execute(
+                        "SELECT estancia_uuid, id_timestamp_str, sheet_row FROM estancias WHERE dirty = 0 AND sheet_row >= 2 AND sheet_row < ?",
+                        (start_row_recent,),
+                    ).fetchall()
+                    for old_r in old_recs:
+                        ts_base = str(old_r["id_timestamp_str"] or "").split(" #")[0]
+                        if not ts_base or ts_base.startswith("ROW-"):
+                            continue
+                        ck_old = _canon_ts_id(ts_base)
+                        if ck_old not in canon_all_bd:
+                            conn.execute("DELETE FROM estancias WHERE estancia_uuid = ?", (old_r["estancia_uuid"],))
+                        elif ck_old in canon_hist_row and ck_old not in canon_hist_dup and int(old_r["sheet_row"] or 0) != canon_hist_row[ck_old]:
+                            conn.execute("UPDATE estancias SET sheet_row = ? WHERE estancia_uuid = ?", (canon_hist_row[ck_old], old_r["estancia_uuid"]))
 
             # Actualizar SUNAT_OCT y CALZADO_OCT
             if sunat_rows:
@@ -616,10 +707,27 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
                         ),
                     )
 
-            # Actualizar Tienda y Gastos sincronizados desde Sheets (sin borrar los locales synced=0)
+            # Actualizar Tienda y Pagos en espejo 1:1 con Sheets (respetando locales synced=0)
+            pend_tienda_ops = conn.execute(
+                "SELECT 1 FROM sync_queue WHERE op_type IN ('TIENDA', 'EDITAR_VENTA_TIENDA_ADMIN', 'ELIMINAR_VENTA_TIENDA_ADMIN') AND status != 'SYNCED' LIMIT 1"
+            ).fetchone()
+            if not pend_tienda_ops:
+                conn.execute("DELETE FROM ventas_tienda WHERE synced = 1 AND (sheet_row >= ? OR sheet_row = 0)", (st_t,))
+                if col_t is not None and st_t > 2:
+                    canon_all_t = {_canon_ts_id(x[0]) for x in col_t[1:] if x and str(x[0]).strip()}
+                    for old_vt in conn.execute("SELECT venta_uuid, fecha_iso FROM ventas_tienda WHERE synced = 1 AND sheet_row >= 2 AND sheet_row < ?", (st_t,)).fetchall():
+                        if _canon_ts_id(old_vt["fecha_iso"]) not in canon_all_t:
+                            conn.execute("DELETE FROM ventas_tienda WHERE venta_uuid = ?", (old_vt["venta_uuid"],))
             if tienda_rows:
-                conn.execute("DELETE FROM ventas_tienda WHERE synced = 1")
+                dirty_t_rows = {
+                    int(r["sheet_row"])
+                    for r in conn.execute("SELECT sheet_row FROM ventas_tienda WHERE synced = 0 AND sheet_row >= 2").fetchall()
+                }
+                if pend_tienda_ops:
+                    conn.execute("DELETE FROM ventas_tienda WHERE synced = 1 AND sheet_row >= ?", (st_t,))
                 for s_row_t, tr in tienda_rows:
+                    if s_row_t in dirty_t_rows:
+                        continue
                     if len(tr) < 9:
                         continue
                     prod_t = str(tr[2] or "").strip()
@@ -628,7 +736,7 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
                         continue
                     conn.execute(
                         """
-                        INSERT INTO ventas_tienda (
+                        INSERT OR REPLACE INTO ventas_tienda (
                             venta_uuid, lote_uuid, estancia_uuid, id_estancia, fecha_iso, fecha_dmy,
                             producto, cantidad, metodo_pago, hab, personal, precio_unit, subtotal, nro_op_yape, sheet_row, synced
                         ) VALUES (?, 'SHEET', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
@@ -650,20 +758,38 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
                         ),
                     )
 
+            pend_pago_ops = conn.execute(
+                "SELECT 1 FROM sync_queue WHERE op_type IN ('PAGO', 'EDITAR_PAGO_ADMIN', 'ELIMINAR_PAGO_ADMIN', 'ELIMINAR_ESTANCIA_ADMIN') AND status != 'SYNCED' LIMIT 1"
+            ).fetchone()
+            if not pend_pago_ops:
+                conn.execute("DELETE FROM pagos WHERE synced = 1 AND (sheet_row >= ? OR sheet_row = 0)", (st_pg,))
+                if col_pg is not None and st_pg > 2:
+                    ids_all_pg = {str(x[0]).strip() for x in col_pg[1:] if x and str(x[0]).strip()}
+                    for old_pg in conn.execute("SELECT pago_id FROM pagos WHERE synced = 1 AND sheet_row >= 2 AND sheet_row < ?", (st_pg,)).fetchall():
+                        if str(old_pg["pago_id"]).strip() not in ids_all_pg:
+                            conn.execute("DELETE FROM pagos WHERE pago_id = ?", (old_pg["pago_id"],))
             if pagos_hist_rows:
-                conn.execute("DELETE FROM pagos WHERE synced = 1")
+                dirty_p_ids = {
+                    str(r["pago_id"])
+                    for r in conn.execute("SELECT pago_id FROM pagos WHERE synced = 0").fetchall()
+                }
+                if pend_pago_ops:
+                    conn.execute("DELETE FROM pagos WHERE synced = 1 AND sheet_row >= ?", (st_pg,))
                 for s_row_p, pr_h in pagos_hist_rows:
-                    if len(pr_h) < 6 or not str(pr_h[0] or "").strip():
+                    pid_s = str(pr_h[0] or "").strip() if len(pr_h) > 0 else ""
+                    if not pid_s or len(pr_h) < 6:
+                        continue
+                    if pid_s in dirty_p_ids:
                         continue
                     conn.execute(
                         """
-                        INSERT OR IGNORE INTO pagos (
+                        INSERT OR REPLACE INTO pagos (
                             pago_id, estancia_uuid, id_estancia, fecha_iso, hab, huesped, monto,
                             medio_pago, tipo_pago, concepto, nro_operacion, sheet_row, synced
                         ) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                         """,
                         (
-                            str(pr_h[0]).strip(),
+                            pid_s,
                             str(pr_h[2] or "").strip() if len(pr_h) > 2 else "",
                             str(pr_h[1] or "").strip() if len(pr_h) > 1 else "",
                             str(pr_h[3] or "").strip() if len(pr_h) > 3 else "",
@@ -729,41 +855,261 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
                             (stock_vp, idx_vp + 1, prod_vp),
                         )
 
+            # Actualizar Kardex de Almacén (import_Almacen!A2:J3000) respetando movimientos locales synced=0
+            if almacen_rows:
+                pend_del_alm = conn.execute(
+                    "SELECT 1 FROM sync_queue WHERE op_type = 'ELIMINAR_MOVIMIENTO_ALMACEN' AND status != 'SYNCED' LIMIT 1"
+                ).fetchone()
+                if not pend_del_alm:
+                    conn.execute("DELETE FROM almacen_movimientos WHERE synced = 1")
+                    for idx_am, ar in enumerate(almacen_rows):
+                        s_row_am = 2 + idx_am
+                        if not ar or not any(str(c or "").strip() for c in ar):
+                            continue
+                        prod_am = str(ar[2] or "").strip() if len(ar) > 2 else ""
+                        tipo_am = str(ar[7] or "").strip() if len(ar) > 7 else ""
+                        if not prod_am or not tipo_am:
+                            continue
+                        id_tx_am = str(ar[0] or "").strip()
+                        fecha_am = normalizar_fecha_dmy(ar[1]) if len(ar) > 1 else ""
+                        try:
+                            cant_am = round(float(str(ar[3] or "0").replace(",", "").strip() or 0), 4)
+                        except Exception:
+                            cant_am = parse_moneda(ar[3]) if len(ar) > 3 else 0.0
+                        costo_t_am = parse_moneda(ar[4]) if len(ar) > 4 else 0.0
+                        costo_u_am = parse_moneda(ar[5]) if len(ar) > 5 else 0.0
+                        met_am = str(ar[6] or "N/A").strip() if len(ar) > 6 else "N/A"
+                        nota_am = str(ar[8] or "").strip() if len(ar) > 8 else ""
+                        uuid_am = str(ar[9] or "").strip() if len(ar) > 9 else ""
+                        if not uuid_am:
+                            uuid_am = f"SH-ALM-{s_row_am}"
+                        conn.execute(
+                            """
+                            INSERT OR IGNORE INTO almacen_movimientos (
+                                mov_uuid, lote_uuid, id_transaccion, fecha_dmy, producto,
+                                cantidad, costo_total, costo_unitario, metodo_pago, tipo_movimiento, nota, sheet_row, synced
+                            ) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                            """,
+                            (
+                                uuid_am,
+                                id_tx_am,
+                                fecha_am,
+                                prod_am,
+                                cant_am,
+                                costo_t_am,
+                                costo_u_am,
+                                met_am,
+                                tipo_am,
+                                nota_am,
+                                s_row_am,
+                            ),
+                        )
+
+            # Actualizar Gastos en espejo 1:1 con Registro_Gastos (sin colisiones de gasto_uuid ni duplicados por fecha)
+            pend_gasto_ops = conn.execute(
+                "SELECT 1 FROM sync_queue WHERE op_type IN ('GASTO', 'EDITAR_GASTO_ADMIN', 'ELIMINAR_GASTO_ADMIN') AND status != 'SYNCED' LIMIT 1"
+            ).fetchone()
+            prev_g_by_canon = {}
+            dirty_g_canon = set()
+            seen_local_g = set()
+            for rg_loc in conn.execute(
+                "SELECT gasto_uuid, id_ts_str, personal, synced FROM gastos ORDER BY CASE WHEN gasto_uuid LIKE 'SH-G-%' THEN 1 ELSE 0 END ASC, synced ASC"
+            ).fetchall():
+                u_prev = str(rg_loc["gasto_uuid"] or "")
+                c_k = _canon_ts_id(str(rg_loc["id_ts_str"] or "").split(" #")[0])
+                if int(rg_loc["synced"] or 0) == 0:
+                    dirty_g_canon.add(c_k)
+                    seen_local_g.add(c_k)
+                else:
+                    if c_k and not c_k.startswith("SH-G-") and c_k in seen_local_g and u_prev.startswith("SH-G-"):
+                        conn.execute("DELETE FROM gastos WHERE gasto_uuid = ?", (u_prev,))
+                        continue
+                    seen_local_g.add(c_k)
+                    if c_k not in prev_g_by_canon:
+                        prev_g_by_canon[c_k] = {
+                            "uuid": u_prev if not u_prev.startswith("SH-G-") else str(uuid.uuid4()),
+                            "personal": str(rg_loc["personal"] or "").strip(),
+                        }
+
+            if not pend_gasto_ops:
+                conn.execute("DELETE FROM gastos WHERE synced = 1 AND (sheet_row >= ? OR sheet_row = 0)", (st_g,))
+            else:
+                conn.execute("DELETE FROM gastos WHERE synced = 1 AND gasto_uuid LIKE 'SH-G-%' AND sheet_row >= ?", (st_g,))
+
+            if not pend_gasto_ops and col_g is not None and st_g > 2:
+                canon_all_g = {_canon_ts_id(x[0]) for x in col_g[1:] if x and str(x[0]).strip()}
+                for old_g in conn.execute("SELECT gasto_uuid, id_ts_str FROM gastos WHERE synced = 1 AND sheet_row >= 2 AND sheet_row < ?", (st_g,)).fetchall():
+                    base_old_g = str(old_g["id_ts_str"] or "").split(" #")[0]
+                    if not base_old_g.startswith("SH-G-") and _canon_ts_id(base_old_g) not in canon_all_g:
+                        conn.execute("DELETE FROM gastos WHERE gasto_uuid = ?", (old_g["gasto_uuid"],))
+
             if gastos_rows:
+                rem_synced_by_canon = {}
+                for rg_rem in conn.execute("SELECT gasto_uuid, id_ts_str FROM gastos WHERE synced = 1").fetchall():
+                    ck_rem = _canon_ts_id(str(rg_rem["id_ts_str"] or "").split(" #")[0])
+                    rem_synced_by_canon.setdefault(ck_rem, []).append((str(rg_rem["gasto_uuid"]), str(rg_rem["id_ts_str"])))
+                seen_g_canon = set()
+                used_g_uuids = {
+                    str(r["gasto_uuid"]) for r in conn.execute("SELECT gasto_uuid FROM gastos").fetchall()
+                }
                 for s_row_g, gr in gastos_rows:
                     if len(gr) < 6:
                         continue
-                    id_g_str = str(gr[0] or "").strip() or f"SH-G-{s_row_g}"
+                    desc_g_raw = str(gr[2] or "").strip()
+                    monto_g_raw = parse_moneda(gr[3])
+                    if not str(gr[0] or "").strip() and not desc_g_raw and monto_g_raw <= 0:
+                        continue
+                    raw_id_g = str(gr[0] or "").strip()
+                    canon_id_g = _canon_ts_id(raw_id_g) if raw_id_g else f"SH-G-{s_row_g}"
+                    if canon_id_g in dirty_g_canon:
+                        continue
+                    if canon_id_g in seen_g_canon:
+                        id_g_final = f"{canon_id_g} #{s_row_g}"
+                    else:
+                        id_g_final = canon_id_g
+                        for u_old_rem, ts_old_rem in rem_synced_by_canon.get(canon_id_g, []):
+                            if ts_old_rem != id_g_final:
+                                conn.execute("DELETE FROM gastos WHERE gasto_uuid = ? AND synced = 1", (u_old_rem,))
+                                used_g_uuids.discard(u_old_rem)
+                    seen_g_canon.add(canon_id_g)
+
                     f_g_dmy = normalizar_fecha_dmy(gr[1])
                     hora_g = ""
-                    if " " in str(gr[0] or ""):
-                        partes_h = str(gr[0]).split(" ")[1].split(":")
+                    if " " in canon_id_g:
+                        partes_h = canon_id_g.split(" ")[1].split(":")
                         if len(partes_h) >= 2:
                             hora_g = f"{partes_h[0].zfill(2)}:{partes_h[1].zfill(2)}"
+
+                    prev_info = prev_g_by_canon.get(canon_id_g) or {}
+                    cand_uuid = prev_info.get("uuid") or str(uuid.uuid4())
+                    if cand_uuid in used_g_uuids:
+                        ex_same = conn.execute("SELECT gasto_uuid FROM gastos WHERE id_ts_str = ?", (id_g_final,)).fetchone()
+                        if ex_same:
+                            cand_uuid = str(ex_same["gasto_uuid"])
+                        else:
+                            cand_uuid = str(uuid.uuid4())
+                    used_g_uuids.add(cand_uuid)
+
+                    pers_sh = str(gr[9] or "").strip() if len(gr) > 9 else ""
+                    if not pers_sh and prev_info.get("personal"):
+                        pers_sh = prev_info["personal"]
+
                     conn.execute(
                         """
                         INSERT INTO gastos (
                             gasto_uuid, id_ts_str, fecha_gasto_iso, fecha_gasto_dmy, hora_registro,
-                            descripcion, monto, categoria, metodo_pago, tipo_comp, nro_comp, responsable, sheet_row, synced
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                        ON CONFLICT(id_ts_str) DO UPDATE SET sheet_row = excluded.sheet_row, synced = 1
+                            descripcion, monto, categoria, metodo_pago, tipo_comp, nro_comp, responsable, personal, sheet_row, synced
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        ON CONFLICT(id_ts_str) DO UPDATE SET
+                            sheet_row = excluded.sheet_row,
+                            fecha_gasto_dmy = excluded.fecha_gasto_dmy,
+                            descripcion = excluded.descripcion,
+                            monto = excluded.monto,
+                            categoria = excluded.categoria,
+                            metodo_pago = excluded.metodo_pago,
+                            tipo_comp = excluded.tipo_comp,
+                            nro_comp = excluded.nro_comp,
+                            responsable = excluded.responsable,
+                            personal = CASE WHEN excluded.personal != '' THEN excluded.personal ELSE gastos.personal END,
+                            synced = 1
+                        WHERE gastos.synced = 1
                         """,
                         (
-                            f"SH-G-{s_row_g}",
-                            id_g_str,
-                            id_g_str if "/" in id_g_str else f_g_dmy,
+                            cand_uuid,
+                            id_g_final,
+                            id_g_final if "/" in id_g_final else f_g_dmy,
                             f_g_dmy,
                             hora_g,
-                            str(gr[2] or "").strip(),
-                            parse_moneda(gr[3]),
+                            desc_g_raw,
+                            monto_g_raw,
                             str(gr[4] or "").strip(),
                             str(gr[5] or "").strip(),
                             str(gr[6] or "").strip() if len(gr) > 6 else "",
                             str(gr[7] or "").strip() if len(gr) > 7 else "",
                             str(gr[8] or "Admin").strip() if len(gr) > 8 else "Admin",
+                            pers_sh,
                             s_row_g,
                         ),
                     )
+
+            if horario_rows:
+                for hr in horario_rows:
+                    if len(hr) < 2 or not str(hr[0] or "").strip():
+                        continue
+                    emp_h = str(hr[0]).strip()
+                    f_h = normalizar_fecha_dmy(hr[1])
+                    loc_h = conn.execute(
+                        "SELECT synced FROM horario_registros WHERE empleado = ? AND fecha_dmy = ?", (emp_h, f_h)
+                    ).fetchone()
+                    if loc_h and int(loc_h["synced"] or 0) == 0:
+                        continue
+                    def _hc(i_h: int) -> str:
+                        return str(hr[i_h] or "").strip() if len(hr) > i_h else ""
+                    try:
+                        xn = 1 if _hc(8) in ("1", "TRUE", "true") else 0
+                    except Exception:
+                        xn = 0
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO horario_registros
+                            (empleado, fecha_dmy, ymd, e1, s1, e2, s2, estado, extras, extra_noche, nota, ult_marca_ts, updated_at, equipo, synced)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, 1)
+                        """,
+                        (emp_h, f_h, fecha_dmy_a_ymd(f_h), _hm_pull(_hc(2)), _hm_pull(_hc(3)), _hm_pull(_hc(4)), _hm_pull(_hc(5)), _hc(6), _hc(7), xn, _hc(9), _hc(10), _hc(11)),
+                    )
+            if horario_audit_rows:
+                for ar_h in horario_audit_rows:
+                    if len(ar_h) < 7 or not str(ar_h[0] or "").strip():
+                        continue
+                    campo_h = str(ar_h[3] or "").strip()
+                    inv = {"Entrada 1": "e1", "Salida 1": "s1", "Entrada 2": "e2", "Salida 2": "s2", "Estado (F)": "estado",
+                           "Horas extras (G)": "extras", "Extra nocturno": "extra_noche", "Nota": "nota"}
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO horario_auditoria
+                            (audit_uuid, empleado, fecha_dmy, campo, valor_anterior, valor_nuevo, editado_ts, equipo, synced)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        """,
+                        (str(ar_h[0]).strip(), str(ar_h[1] or "").strip(), normalizar_fecha_dmy(ar_h[2]), inv.get(campo_h, campo_h),
+                         _hm_pull(ar_h[4]), _hm_pull(ar_h[5]), str(ar_h[6] or "").strip(),
+                         str(ar_h[7] or "") if len(ar_h) > 7 else ""),
+                    )
+            if control_pases_rows:
+                pend_pase_ops = conn.execute(
+                    "SELECT 1 FROM sync_queue WHERE op_type IN ('PASE_UPSERT', 'PASE_DELETE') AND status != 'SYNCED' LIMIT 1"
+                ).fetchone()
+                ids_rem_pases = set()
+                for pr_c in control_pases_rows:
+                    if len(pr_c) < 10 or not str(pr_c[0] or "").strip():
+                        continue
+                    pu_id = str(pr_c[0]).strip()
+                    ids_rem_pases.add(pu_id)
+                    loc_p = conn.execute("SELECT synced FROM control_pases WHERE pase_uuid = ?", (pu_id,)).fetchone()
+                    if loc_p and int(loc_p["synced"] or 0) == 0:
+                        continue
+                    f_p = normalizar_fecha_dmy(pr_c[1])
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO control_pases (
+                            pase_uuid, fecha_dmy, ymd, hora, hab, estancia_uuid, id_estancia,
+                            huesped_titular, dni_visita, nombre_visita, estado, monto,
+                            motivo_rechazo, equipo, created_at, synced
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        """,
+                        (
+                            pu_id, f_p, fecha_dmy_a_ymd(f_p), _hm_pull(pr_c[2]),
+                            str(pr_c[3] or "").strip(), str(pr_c[4] or "").strip(), str(pr_c[5] or "").strip(),
+                            str(pr_c[6] or "").strip(), str(pr_c[7] or "").strip(), str(pr_c[8] or "").strip(),
+                            str(pr_c[9] or "ACEPTADO").strip().upper(), parse_moneda(pr_c[10]) if len(pr_c) > 10 else 0.0,
+                            str(pr_c[11] or "").strip() if len(pr_c) > 11 else "",
+                            str(pr_c[12] or "").strip() if len(pr_c) > 12 else "",
+                            str(pr_c[13] or "").strip() if len(pr_c) > 13 else "",
+                        ),
+                    )
+                if not pend_pase_ops:
+                    for old_cp in conn.execute("SELECT pase_uuid FROM control_pases WHERE synced = 1").fetchall():
+                        if str(old_cp["pase_uuid"]) not in ids_rem_pases:
+                            conn.execute("DELETE FROM control_pases WHERE pase_uuid = ?", (old_cp["pase_uuid"],))
 
         return {
             "status": "OK",
@@ -793,33 +1139,76 @@ def pull_from_sheets(full_bootstrap: bool = False) -> Dict[str, Any]:
 # 2. PUSH DE COLA OUTBOX FIFO IDEMPOTENTE (CERO DUPLICADOS EN GOOGLE SHEETS)
 # ==============================================================================
 
-def _resolver_fila_estancia_en_sheets(ws_bd, sheet_row_hint: int, id_ts_str: str) -> int:
+def _resolver_fila_por_col_a(ws, sheet_row_hint: int, target_id: str) -> int:
+    """Ubica la fila exacta en Sheets normalizando fechas con _canon_ts_id (1 sola llamada API)."""
+    col_a = ws.col_values(1)
+    base_id = str(target_id or "").split(" #")[0].strip()
+    if base_id.startswith("ROW-"):
+        if 2 <= sheet_row_hint <= len(col_a) and not str(col_a[sheet_row_hint - 1]).strip():
+            return sheet_row_hint
+        return 0
+    canon_t = _canon_ts_id(base_id)
+    if not canon_t:
+        return 0
+    if 2 <= sheet_row_hint <= len(col_a) and _canon_ts_id(col_a[sheet_row_hint - 1]) == canon_t:
+        return sheet_row_hint
+    matches = [idx + 1 for idx in range(1, len(col_a)) if _canon_ts_id(col_a[idx]) == canon_t]
+    if not matches:
+        return 0
     if sheet_row_hint and sheet_row_hint >= 2:
-        try:
-            val_a = ws_bd.acell(f"A{sheet_row_hint}").value
-            if val_a and str(val_a).strip() == str(id_ts_str).strip():
-                return sheet_row_hint
-        except Exception:
-            pass
-
-    col_a = ws_bd.col_values(1)
-    for i in range(len(col_a) - 1, max(0, len(col_a) - 120), -1):
-        if str(col_a[i]).strip() == str(id_ts_str).strip():
-            return i + 1
-    return 0
+        return min(matches, key=lambda r: abs(r - sheet_row_hint))
+    return matches[-1]
 
 
-def _append_fila_idempotente(ws, id_col_a: str, row_values: List[Any], range_end_col: str) -> int:
+def _resolver_fila_estancia_en_sheets(ws_bd, sheet_row_hint: int, id_ts_str: str) -> int:
+    return _resolver_fila_por_col_a(ws_bd, sheet_row_hint, id_ts_str)
+
+
+def _resolver_fila_tienda(ws_tienda, sheet_row_hint: int, fecha_iso: str, producto_prev: str = "") -> int:
+    """Ubica la fila exacta en 2.Registro_Ventas_Tienda cruzando Fecha_Hora (Col A) + Producto (Col C)."""
+    vals_ac = ws_tienda.get("A1:C") or []
+    canon_f = _canon_ts_id(str(fecha_iso or "").split(" #")[0])
+    prod_norm = str(producto_prev or "").strip().lower()
+
+    def _match_row(idx0: int, strict_prod: bool) -> bool:
+        if idx0 < 1 or idx0 >= len(vals_ac):
+            return False
+        r = vals_ac[idx0]
+        c_a = _canon_ts_id(r[0] if len(r) > 0 else "")
+        if canon_f and c_a != canon_f:
+            return False
+        if strict_prod and prod_norm:
+            c_prod = str(r[2] if len(r) > 2 else "").strip().lower()
+            if c_prod != prod_norm:
+                return False
+        return bool(canon_f or prod_norm)
+
+    if 2 <= sheet_row_hint <= len(vals_ac) and _match_row(sheet_row_hint - 1, True):
+        return sheet_row_hint
+    matches = [i + 1 for i in range(1, len(vals_ac)) if _match_row(i, True)]
+    if not matches and prod_norm and canon_f:
+        if 2 <= sheet_row_hint <= len(vals_ac) and _match_row(sheet_row_hint - 1, False):
+            return sheet_row_hint
+        matches = [i + 1 for i in range(1, len(vals_ac)) if _match_row(i, False)]
+    if not matches:
+        return 0
+    if sheet_row_hint and sheet_row_hint >= 2:
+        return min(matches, key=lambda r: abs(r - sheet_row_hint))
+    return matches[-1]
+
+
+def _append_fila_idempotente(ws, id_col_a: str, row_values: List[Any], range_end_col: str, value_input_option: str = "USER_ENTERED") -> int:
     """
-    Verifica si id_col_a ya existe en las últimas 35 filas de la columna A.
+    Verifica si id_col_a ya existe en las últimas 35 filas de la columna A (normalizando formato de fecha).
     Si ya existe (por reintento tras micro-corte), devuelve su fila sin duplicar.
     Si no existe, escribe en last_row + 1 con USER_ENTERED.
     """
     col_a = ws.col_values(1)
     last_row = len(col_a)
-    if id_col_a:
+    canon_id = _canon_ts_id(id_col_a)
+    if canon_id:
         for i in range(last_row - 1, max(0, last_row - 35), -1):
-            if str(col_a[i]).strip() == str(id_col_a).strip():
+            if _canon_ts_id(col_a[i]) == canon_id:
                 return i + 1
 
     next_row = max(2, last_row + 1)
@@ -831,9 +1220,34 @@ def _append_fila_idempotente(ws, id_col_a: str, row_values: List[Any], range_end
     ws.update(
         range_name=f"A{next_row}:{range_end_col}{next_row}",
         values=[row_values],
-        value_input_option="USER_ENTERED",
+        value_input_option=value_input_option,
     )
     return next_row
+
+
+def _hm_pull(v: Any) -> str:
+    s = str(v or "").strip()
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})(?::\d{2})?", s)
+    return f"{int(m.group(1)):02d}:{m.group(2)}" if m else s
+
+
+HORARIO_CABECERA = ["Empleado", "Fecha", "Entrada 1", "Salida 1", "Entrada 2", "Salida 2", "Estado (F)", "Horas extras (G)",
+                    "Extra nocturno", "Nota", "Actualizado", "Equipo"]
+HORARIO_AUDIT_CABECERA = ["ID", "Empleado", "Fecha turno", "Campo", "Valor anterior", "Valor nuevo", "Editado el", "Equipo"]
+
+
+def _asegurar_hoja_horario(sh, nombre: str, cabecera: List[str]):
+    """Devuelve la pestaña nativa de Horario; la crea con su cabecera si aún no existe."""
+    try:
+        return sh.worksheet(nombre)
+    except Exception:
+        ws_n = sh.add_worksheet(title=nombre, rows=2000, cols=len(cabecera))
+        ws_n.update(range_name="A1", values=[cabecera], value_input_option="USER_ENTERED")
+        try:
+            ws_n.freeze(rows=1)
+        except Exception:
+            pass
+        return ws_n
 
 
 def process_sync_queue() -> Dict[str, Any]:
@@ -862,6 +1276,7 @@ def process_sync_queue() -> Dict[str, Any]:
         ws_tienda = None
         ws_gastos = None
         ws_disp = None
+        hor_cache: Dict[str, Any] = {}
 
         for item in pending_items:
             qid = item["queue_id"]
@@ -963,16 +1378,250 @@ def process_sync_queue() -> Dict[str, Any]:
                             # (en Terrazas S2 tiene formula =MAP -> nunca se escribe)
                             ws_bd.update(f"S{t_row}", [[est_up["adic_snacks"]]], value_input_option="USER_ENTERED")
                     with db_transaction() as c_up:
-                        c_up.execute("UPDATE ventas_tienda SET synced = 1 WHERE lote_uuid = ?", (item["entity_uuid"],))
+                        lote_vts = c_up.execute(
+                            "SELECT venta_uuid FROM ventas_tienda WHERE lote_uuid = ? ORDER BY rowid ASC",
+                            (item["entity_uuid"],),
+                        ).fetchall()
+                        for idx_lv, lv in enumerate(lote_vts):
+                            c_up.execute(
+                                "UPDATE ventas_tienda SET sheet_row = ?, synced = 1 WHERE venta_uuid = ?",
+                                (next_t + idx_lv, lv["venta_uuid"]),
+                            )
                         if est_up:
                             c_up.execute("UPDATE estancias SET dirty = 0 WHERE estancia_uuid = ?", (est_up["estancia_uuid"],))
+
+                elif op_type == "ELIMINAR_ESTANCIA_ADMIN":
+                    t_row_e = _resolver_fila_estancia_en_sheets(
+                        ws_bd, int(payload.get("sheet_row") or 0), payload.get("id_timestamp_str") or ""
+                    )
+                    if t_row_e >= 3:
+                        ws_bd.delete_rows(t_row_e)
+                    elif t_row_e == 2:
+                        # Protege las fórmulas =MAP(...) alojadas en la Fila 2 (P2, R2, V2, AA2:AD2, AN2:AO2, y S2 si aplica)
+                        rangos_f2 = ["A2:O2", "Q2", "T2:U2" if FORMULA_SNACKS_EN_S2 else "S2:U2", "W2:Z2", "AE2:AM2", "AP2:BA2"]
+                        ws_bd.batch_clear(rangos_f2)
+
+                    pagos_vinc = payload.get("pagos_vinculados") or []
+                    if pagos_vinc:
+                        if ws_pagos is None:
+                            ws_pagos = sh.worksheet("Registro_Pagos")
+                        filas_p_borrar = set()
+                        for pv in pagos_vinc:
+                            rp = _resolver_fila_por_col_a(ws_pagos, int(pv.get("sheet_row") or 0), pv.get("pago_id") or "")
+                            if rp >= 2:
+                                filas_p_borrar.add(rp)
+                        for rp_del in sorted(filas_p_borrar, reverse=True):
+                            ws_pagos.delete_rows(rp_del)
 
                 elif op_type == "GASTO":
                     if ws_gastos is None:
                         ws_gastos = sh.worksheet("Registro_Gastos")
-                    row_g = _append_fila_idempotente(ws_gastos, payload["id_ts_str"], payload["fila_gasto"], "I")
+                    row_g = _append_fila_idempotente(ws_gastos, payload["id_ts_str"], payload["fila_gasto"], "J")
                     with db_transaction() as c_up:
                         c_up.execute("UPDATE gastos SET sheet_row = ?, synced = 1 WHERE gasto_uuid = ?", (row_g, item["entity_uuid"]))
+
+                elif op_type == "EDITAR_GASTO_ADMIN":
+                    if ws_gastos is None:
+                        ws_gastos = sh.worksheet("Registro_Gastos")
+                    t_row_g = _resolver_fila_por_col_a(
+                        ws_gastos, int(payload.get("sheet_row") or 0), payload.get("id_ts_str") or ""
+                    )
+                    if t_row_g >= 2:
+                        ws_gastos.update(
+                            range_name=f"B{t_row_g}:J{t_row_g}",
+                            values=[payload["fila_bj"]],
+                            value_input_option="USER_ENTERED",
+                        )
+                    with db_transaction() as c_up:
+                        c_up.execute(
+                            "UPDATE gastos SET sheet_row = CASE WHEN ? >= 2 THEN ? ELSE sheet_row END, synced = 1 WHERE gasto_uuid = ?",
+                            (t_row_g, t_row_g, item["entity_uuid"]),
+                        )
+
+                elif op_type == "ELIMINAR_GASTO_ADMIN":
+                    if ws_gastos is None:
+                        ws_gastos = sh.worksheet("Registro_Gastos")
+                    t_row_g = _resolver_fila_por_col_a(
+                        ws_gastos, int(payload.get("sheet_row") or 0), payload.get("id_ts_str") or ""
+                    )
+                    if t_row_g >= 2:
+                        ws_gastos.delete_rows(t_row_g)
+
+                elif op_type == "EDITAR_VENTA_TIENDA_ADMIN":
+                    if ws_tienda is None:
+                        ws_tienda = sh.worksheet("2.Registro_Ventas_Tienda")
+                    t_row_t = _resolver_fila_tienda(
+                        ws_tienda,
+                        int(payload.get("sheet_row") or 0),
+                        payload.get("fecha_iso") or "",
+                        payload.get("producto_prev") or "",
+                    )
+                    if t_row_t >= 2:
+                        ws_tienda.batch_update(
+                            [
+                                {"range": f"B{t_row_t}:I{t_row_t}", "values": [payload["fila_bi"]]},
+                                {"range": f"L{t_row_t}", "values": [[payload.get("nro_op_yape") or ""]]},
+                            ],
+                            value_input_option="USER_ENTERED",
+                        )
+                    est_up_t = payload.get("estancia_updates")
+                    if est_up_t and "adic_snacks" in est_up_t:
+                        est_r = _resolver_fila_estancia_en_sheets(
+                            ws_bd, int(est_up_t.get("sheet_row") or 0), est_up_t.get("id_timestamp_str") or ""
+                        )
+                        if est_r >= 2 and not FORMULA_SNACKS_EN_S2:
+                            ws_bd.update(f"S{est_r}", [[est_up_t["adic_snacks"]]], value_input_option="USER_ENTERED")
+                    with db_transaction() as c_up:
+                        c_up.execute(
+                            "UPDATE ventas_tienda SET sheet_row = CASE WHEN ? >= 2 THEN ? ELSE sheet_row END, synced = 1 WHERE venta_uuid = ?",
+                            (t_row_t, t_row_t, item["entity_uuid"]),
+                        )
+                        if est_up_t and est_up_t.get("estancia_uuid"):
+                            c_up.execute("UPDATE estancias SET dirty = 0 WHERE estancia_uuid = ?", (est_up_t["estancia_uuid"],))
+
+                elif op_type == "ELIMINAR_VENTA_TIENDA_ADMIN":
+                    if ws_tienda is None:
+                        ws_tienda = sh.worksheet("2.Registro_Ventas_Tienda")
+                    t_row_t = _resolver_fila_tienda(
+                        ws_tienda,
+                        int(payload.get("sheet_row") or 0),
+                        payload.get("fecha_iso") or "",
+                        payload.get("producto_prev") or "",
+                    )
+                    if t_row_t >= 2:
+                        ws_tienda.delete_rows(t_row_t)
+                    est_up_t = payload.get("estancia_updates")
+                    if est_up_t and "adic_snacks" in est_up_t:
+                        est_r = _resolver_fila_estancia_en_sheets(
+                            ws_bd, int(est_up_t.get("sheet_row") or 0), est_up_t.get("id_timestamp_str") or ""
+                        )
+                        if est_r >= 2 and not FORMULA_SNACKS_EN_S2:
+                            ws_bd.update(f"S{est_r}", [[est_up_t["adic_snacks"]]], value_input_option="USER_ENTERED")
+                    if est_up_t and est_up_t.get("estancia_uuid"):
+                        with db_transaction() as c_up:
+                            c_up.execute("UPDATE estancias SET dirty = 0 WHERE estancia_uuid = ?", (est_up_t["estancia_uuid"],))
+
+                elif op_type == "EDITAR_PAGO_ADMIN":
+                    if ws_pagos is None:
+                        ws_pagos = sh.worksheet("Registro_Pagos")
+                    t_row_p = _resolver_fila_por_col_a(
+                        ws_pagos, int(payload.get("sheet_row") or 0), payload.get("pago_id") or ""
+                    )
+                    if t_row_p >= 2:
+                        ws_pagos.update(
+                            range_name=f"B{t_row_p}:J{t_row_p}",
+                            values=[payload["fila_bj"]],
+                            value_input_option="USER_ENTERED",
+                        )
+                    est_up_p = payload.get("estancia_updates")
+                    if est_up_p:
+                        est_r = _resolver_fila_estancia_en_sheets(
+                            ws_bd, int(est_up_p.get("sheet_row") or 0), est_up_p.get("id_timestamp_str") or ""
+                        )
+                        if est_r >= 2:
+                            ws_bd.batch_update(
+                                [
+                                    {"range": f"W{est_r}:Z{est_r}", "values": [est_up_p["bloque_wz"]]},
+                                    {"range": f"AM{est_r}", "values": [[est_up_p["pago_visa"]]]},
+                                ],
+                                value_input_option="USER_ENTERED",
+                            )
+                    with db_transaction() as c_up:
+                        c_up.execute(
+                            "UPDATE pagos SET sheet_row = CASE WHEN ? >= 2 THEN ? ELSE sheet_row END, synced = 1 WHERE pago_id = ?",
+                            (t_row_p, t_row_p, item["entity_uuid"]),
+                        )
+                        if est_up_p and est_up_p.get("estancia_uuid"):
+                            c_up.execute("UPDATE estancias SET dirty = 0 WHERE estancia_uuid = ?", (est_up_p["estancia_uuid"],))
+
+                elif op_type == "ELIMINAR_PAGO_ADMIN":
+                    if ws_pagos is None:
+                        ws_pagos = sh.worksheet("Registro_Pagos")
+                    t_row_p = _resolver_fila_por_col_a(
+                        ws_pagos, int(payload.get("sheet_row") or 0), payload.get("pago_id") or ""
+                    )
+                    if t_row_p >= 2:
+                        ws_pagos.delete_rows(t_row_p)
+                    est_up_p = payload.get("estancia_updates")
+                    if est_up_p:
+                        est_r = _resolver_fila_estancia_en_sheets(
+                            ws_bd, int(est_up_p.get("sheet_row") or 0), est_up_p.get("id_timestamp_str") or ""
+                        )
+                        if est_r >= 2:
+                            ws_bd.batch_update(
+                                [
+                                    {"range": f"W{est_r}:Z{est_r}", "values": [est_up_p["bloque_wz"]]},
+                                    {"range": f"AM{est_r}", "values": [[est_up_p["pago_visa"]]]},
+                                ],
+                                value_input_option="USER_ENTERED",
+                            )
+                        if est_up_p.get("estancia_uuid"):
+                            with db_transaction() as c_up:
+                                c_up.execute("UPDATE estancias SET dirty = 0 WHERE estancia_uuid = ?", (est_up_p["estancia_uuid"],))
+
+                elif op_type == "HORARIO_UPSERT":
+                    if hor_cache.get("ws") is None:
+                        hor_cache["ws"] = _asegurar_hoja_horario(sh, "import_Horario", HORARIO_CABECERA)
+                        vals_ab = hor_cache["ws"].get("A2:B8000") or []
+                        hor_cache["idx"] = {
+                            (str(r[0]).strip(), normalizar_fecha_dmy(r[1]) if len(r) > 1 else ""): i + 2
+                            for i, r in enumerate(vals_ab) if r and str(r[0]).strip()
+                        }
+                        hor_cache["next"] = len(vals_ab) + 2
+                    ws_h = hor_cache["ws"]
+                    k_h = (payload["empleado"], payload["fecha_dmy"])
+                    fila_h = payload["fila"]
+                    r_h = hor_cache["idx"].get(k_h)
+                    if r_h:
+                        ws_h.update(range_name=f"A{r_h}:L{r_h}", values=[fila_h], value_input_option="RAW")
+                    else:
+                        r_h = hor_cache["next"]
+                        if r_h > ws_h.row_count:
+                            ws_h.add_rows(max(200, r_h - ws_h.row_count + 100))
+                        ws_h.update(range_name=f"A{r_h}:L{r_h}", values=[fila_h], value_input_option="RAW")
+                        hor_cache["idx"][k_h] = r_h
+                        hor_cache["next"] = r_h + 1
+                    with db_transaction() as c_up:
+                        c_up.execute(
+                            "UPDATE horario_registros SET synced = 1 WHERE empleado = ? AND fecha_dmy = ? AND updated_at = ?",
+                            (payload["empleado"], payload["fecha_dmy"], payload["updated_at"]),
+                        )
+
+                elif op_type == "HORARIO_AUDIT":
+                    if hor_cache.get("ws_aud") is None:
+                        hor_cache["ws_aud"] = _asegurar_hoja_horario(sh, "import_Horario_Audit", HORARIO_AUDIT_CABECERA)
+                    _append_fila_idempotente(hor_cache["ws_aud"], payload["audit_uuid"], payload["fila"], "H", value_input_option="RAW")
+                    with db_transaction() as c_up:
+                        c_up.execute("UPDATE horario_auditoria SET synced = 1 WHERE audit_uuid = ?", (payload["audit_uuid"],))
+
+                elif op_type == "PASE_UPSERT":
+                    from pases_logic import PASES_CABECERA
+                    if hor_cache.get("ws_pases") is None:
+                        hor_cache["ws_pases"] = _asegurar_hoja_horario(sh, "import_Control_Pases", PASES_CABECERA)
+                    ws_p = hor_cache["ws_pases"]
+                    col_a_p = ws_p.col_values(1) or []
+                    row_idx_p = None
+                    for idx_p, val_p in enumerate(col_a_p[1:], start=2):
+                        if str(val_p).strip() == str(payload.get("pase_uuid") or "").strip():
+                            row_idx_p = idx_p
+                            break
+                    if row_idx_p:
+                        ws_p.update(range_name=f"A{row_idx_p}:N{row_idx_p}", values=[payload["fila"]], value_input_option="RAW")
+                    else:
+                        _append_fila_idempotente(ws_p, payload["pase_uuid"], payload["fila"], "N", value_input_option="RAW")
+                    with db_transaction() as c_up:
+                        c_up.execute("UPDATE control_pases SET synced = 1 WHERE pase_uuid = ?", (payload["pase_uuid"],))
+
+                elif op_type == "PASE_DELETE":
+                    from pases_logic import PASES_CABECERA
+                    if hor_cache.get("ws_pases") is None:
+                        hor_cache["ws_pases"] = _asegurar_hoja_horario(sh, "import_Control_Pases", PASES_CABECERA)
+                    ws_p = hor_cache["ws_pases"]
+                    col_a_p = ws_p.col_values(1) or []
+                    for idx_p, val_p in enumerate(col_a_p[1:], start=2):
+                        if str(val_p).strip() == str(payload.get("pase_uuid") or "").strip():
+                            ws_p.delete_rows(idx_p)
+                            break
 
                 elif op_type == "MODIFICAR":
                     t_row = _resolver_fila_estancia_en_sheets(
@@ -991,6 +1640,11 @@ def process_sync_queue() -> Dict[str, Any]:
                                 {"range": f"W{t_row}:Z{t_row}", "values": [payload["bloque_wz"]]},
                                 {"range": f"AF{t_row}:AM{t_row}", "values": [payload["bloque_afam"]]},
                                 {"range": f"AQ{t_row}:AY{t_row}", "values": [payload["bloque_aqay"]]},
+                                *(
+                                    [{"range": f"{COL_TIPO_ADICIONAL}{t_row}", "values": [[payload.get("tipo_adicional") or ""]]}]
+                                    if "tipo_adicional" in payload
+                                    else []
+                                ),
                             ],
                             value_input_option="USER_ENTERED",
                         )
@@ -1058,15 +1712,17 @@ def process_sync_queue() -> Dict[str, Any]:
                         ws_bd, int(payload.get("sheet_row") or 0), payload.get("id_timestamp_str") or ""
                     )
                     if t_row >= 2:
-                        ws_bd.batch_update(
-                            [
-                                {"range": f"U{t_row}", "values": [[payload["adic_comp"]]]},
-                                {"range": f"AF{t_row}:AJ{t_row}", "values": [payload["bloque_afaj"]]},
-                                {"range": f"AQ{t_row}", "values": [[payload["empresa"]]]},
-                                {"range": f"AX{t_row}:AY{t_row}", "values": [[payload["celular"], payload["ruc"]]]},
-                            ],
-                            value_input_option="USER_ENTERED",
-                        )
+                        lotes_fact = [
+                            {"range": f"U{t_row}", "values": [[payload["adic_comp"]]]},
+                            {"range": f"AF{t_row}:AJ{t_row}", "values": [payload["bloque_afaj"]]},
+                            {"range": f"AQ{t_row}", "values": [[payload["empresa"]]]},
+                            {"range": f"AX{t_row}:AY{t_row}", "values": [[payload["celular"], payload["ruc"]]]},
+                        ]
+                        if payload.get("dni_actualizado") and payload.get("dni"):
+                            dni_str = str(payload["dni"]).strip()
+                            dni_cell = f"'{dni_str}" if dni_str.startswith("0") else dni_str
+                            lotes_fact.append({"range": f"E{t_row}", "values": [[dni_cell]]})
+                        ws_bd.batch_update(lotes_fact, value_input_option="USER_ENTERED")
                     with db_transaction() as c_up:
                         c_up.execute("UPDATE estancias SET dirty = 0 WHERE estancia_uuid = ?", (item["entity_uuid"],))
 
@@ -1152,6 +1808,110 @@ def process_sync_queue() -> Dict[str, Any]:
                                     ws_vit.delete_columns(max_cols_v + 1, ws_vit.col_count)
                             except Exception:
                                 pass
+
+                elif op_type == "MOVIMIENTO_ALMACEN":
+                    ws_alm = sh.worksheet("import_Almacen")
+                    movs_list = payload.get("movimientos") or []
+                    if movs_list:
+                        col_j = ws_alm.col_values(10)
+                        col_a = ws_alm.col_values(1)
+                        existentes_j = {str(x).strip(): idx_r + 1 for idx_r, x in enumerate(col_j) if str(x).strip()}
+                        next_row_alm = max(len(col_a), len(col_j), 1) + 1
+                        filas_nuevas = []
+                        uuids_nuevos = []
+                        actualizaciones_sync = []
+
+                        for m_it in movs_list:
+                            m_u = str(m_it.get("mov_uuid") or "").strip()
+                            fila_m = m_it.get("fila") or []
+                            if not m_u or not fila_m:
+                                continue
+                            if m_u in existentes_j:
+                                actualizaciones_sync.append((existentes_j[m_u], m_u))
+                            else:
+                                filas_nuevas.append(fila_m)
+                                uuids_nuevos.append(m_u)
+
+                        if filas_nuevas:
+                            end_row_alm = next_row_alm + len(filas_nuevas) - 1
+                            if ws_alm.row_count < end_row_alm + 20 or ws_alm.col_count < 10:
+                                ws_alm.resize(
+                                    rows=max(ws_alm.row_count, end_row_alm + 100),
+                                    cols=max(ws_alm.col_count, 10),
+                                )
+                            ws_alm.update(
+                                values=filas_nuevas,
+                                range_name=f"A{next_row_alm}:J{end_row_alm}",
+                                value_input_option="USER_ENTERED",
+                            )
+                            for offset_m, m_u in enumerate(uuids_nuevos):
+                                actualizaciones_sync.append((next_row_alm + offset_m, m_u))
+
+                        # Leer stock recalculado de Vitrina_Tienda!A6:B45 para transición atómica sin salto
+                        nuevos_stocks_vit = []
+                        try:
+                            ws_vit_ref = sh.worksheet("Vitrina_Tienda")
+                            ab_vals = ws_vit_ref.get("A6:B45") or []
+                            for r_ab in ab_vals:
+                                p_ab = str(r_ab[0] or "").strip() if len(r_ab) > 0 else ""
+                                if p_ab:
+                                    s_ab = parse_moneda(r_ab[1]) if len(r_ab) > 1 else 0.0
+                                    nuevos_stocks_vit.append((s_ab, p_ab))
+                        except Exception:
+                            pass
+
+                        with db_transaction() as c_alm:
+                            for r_num_m, m_u in actualizaciones_sync:
+                                c_alm.execute(
+                                    "UPDATE almacen_movimientos SET sheet_row = ?, synced = 1 WHERE mov_uuid = ?",
+                                    (r_num_m, m_u),
+                                )
+                            for s_ab, p_ab in nuevos_stocks_vit:
+                                c_alm.execute(
+                                    "UPDATE vitrina_local SET stock_sheets = ? WHERE producto = ?",
+                                    (s_ab, p_ab),
+                                )
+
+                elif op_type == "ELIMINAR_MOVIMIENTO_ALMACEN":
+                    ws_alm = sh.worksheet("import_Almacen")
+                    m_u_del = str(payload.get("mov_uuid") or "").strip()
+                    s_row_hint = int(payload.get("sheet_row") or 0)
+                    id_tx_del = str(payload.get("id_transaccion") or "").strip()
+                    prod_del = str(payload.get("producto") or "").strip()
+                    tipo_del = str(payload.get("tipo_movimiento") or "").strip()
+
+                    all_alm = ws_alm.get_all_values()
+                    fila_borrar = 0
+                    for idx_r, r_a in enumerate(all_alm[1:], start=2):
+                        u_cell = str(r_a[9] or "").strip() if len(r_a) > 9 else ""
+                        if m_u_del and u_cell == m_u_del:
+                            fila_borrar = idx_r
+                            break
+                    if not fila_borrar and s_row_hint >= 2 and s_row_hint <= len(all_alm):
+                        r_cand = all_alm[s_row_hint - 1]
+                        if (
+                            len(r_cand) > 7
+                            and str(r_cand[2] or "").strip() == prod_del
+                            and str(r_cand[7] or "").strip() == tipo_del
+                            and str(r_cand[0] or "").strip() == id_tx_del
+                        ):
+                            fila_borrar = s_row_hint
+                    if fila_borrar >= 2:
+                        ws_alm.delete_rows(fila_borrar)
+                        try:
+                            ws_vit_ref = sh.worksheet("Vitrina_Tienda")
+                            ab_vals = ws_vit_ref.get("A6:B45") or []
+                            with db_transaction() as c_vref:
+                                for r_ab in ab_vals:
+                                    p_ab = str(r_ab[0] or "").strip() if len(r_ab) > 0 else ""
+                                    if p_ab:
+                                        s_ab = parse_moneda(r_ab[1]) if len(r_ab) > 1 else 0.0
+                                        c_vref.execute(
+                                            "UPDATE vitrina_local SET stock_sheets = ? WHERE producto = ?",
+                                            (s_ab, p_ab),
+                                        )
+                        except Exception:
+                            pass
 
                 # Marcar operación como SYNCED
                 with db_transaction() as c_done:

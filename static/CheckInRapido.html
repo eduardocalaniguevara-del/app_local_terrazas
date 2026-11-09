@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Huéspedes y Estancias — {{NOMBRE_HOTEL}}</title>
+  <title>Huéspedes y Estancias — Hostal Óvalo</title>
   <style>
     :root {
       --primary: #0f4c81;
@@ -669,9 +669,10 @@
           <div class="field">
             <label for="region">Región <span class="req">*</span></label>
             <select id="region" name="region" required>
+              <option value="" selected disabled>-- Seleccionar Región / Dpto --</option>
               <option value="Arequipa">Arequipa</option>
               <option value="Cusco">Cusco</option>
-              <option value="Lima" selected>Lima</option>
+              <option value="Lima">Lima</option>
               <option value="Moquegua">Moquegua</option>
               <option value="Puno">Puno</option>
               <option value="Tacna">Tacna</option>
@@ -721,24 +722,36 @@
         <details id="acompDetails">
           <summary>➕ Agregar Acompañantes (Hab. Doble / Triple)</summary>
           <div class="details-body">
-            <div class="grid-2">
-              <div class="field">
-                <label for="nAcomp">2. Nombre Acompañante (Doble)</label>
-                <input type="text" id="nAcomp" name="nAcomp" placeholder="Nombre 2do huésped">
-              </div>
-              <div class="field">
+            <div class="grid-2" style="grid-template-columns: minmax(135px, 42%) 1fr; align-items: start;">
+              <div class="field" style="min-width: 0;">
                 <label for="dniAcomp">2. DNI Acompañante</label>
-                <input type="text" id="dniAcomp" name="dniAcomp" inputmode="numeric" placeholder="DNI 2do huésped">
+                <div style="display: flex; gap: 5px; align-items: stretch;">
+                  <input type="text" id="dniAcomp" name="dniAcomp" inputmode="numeric" maxlength="12"
+                         autocorrect="off" autocapitalize="off" spellcheck="false"
+                         placeholder="DNI 2do..." style="flex: 1; min-width: 0;">
+                  <button type="button" id="btnBuscarDniAcomp" class="btn-reniec" style="flex-shrink: 0; padding: 0 9px;" title="Buscar 2do huésped en RENIEC">🔍</button>
+                </div>
+              </div>
+              <div class="field" style="min-width: 0;">
+                <label for="nAcomp">2. Nombre Acompañante (Doble)</label>
+                <input type="text" id="nAcomp" name="nAcomp" list="listaClientesNombres" autocomplete="off" placeholder="Nombre 2do huésped" style="min-width: 0;">
+                <div id="hintAcomp2" class="prev-stay-hint"></div>
               </div>
             </div>
-            <div class="grid-2">
-              <div class="field">
-                <label for="triple1">3. Nombre Acompañante (Triple)</label>
-                <input type="text" id="triple1" name="triple1" placeholder="Nombre 3er huésped">
-              </div>
-              <div class="field">
+            <div class="grid-2" style="grid-template-columns: minmax(135px, 42%) 1fr; align-items: start;">
+              <div class="field" style="min-width: 0;">
                 <label for="triple2">3. DNI Acompañante (Triple)</label>
-                <input type="text" id="triple2" name="triple2" inputmode="numeric" placeholder="DNI 3er huésped">
+                <div style="display: flex; gap: 5px; align-items: stretch;">
+                  <input type="text" id="triple2" name="triple2" inputmode="numeric" maxlength="12"
+                         autocorrect="off" autocapitalize="off" spellcheck="false"
+                         placeholder="DNI 3ro..." style="flex: 1; min-width: 0;">
+                  <button type="button" id="btnBuscarDniTriple" class="btn-reniec" style="flex-shrink: 0; padding: 0 9px;" title="Buscar 3er huésped en RENIEC">🔍</button>
+                </div>
+              </div>
+              <div class="field" style="min-width: 0;">
+                <label for="triple1">3. Nombre Acompañante (Triple)</label>
+                <input type="text" id="triple1" name="triple1" list="listaClientesNombres" autocomplete="off" placeholder="Nombre 3er huésped" style="min-width: 0;">
+                <div id="hintAcomp3" class="prev-stay-hint"></div>
               </div>
             </div>
           </div>
@@ -873,27 +886,33 @@
         <details id="empresaDetails">
           <summary>🏢 Datos de Facturación / Empresa / Hotel Apoyo</summary>
           <div class="details-body">
-            <div class="grid-3">
-              <div class="field">
-                <label for="ruc">RUC</label>
-                <input type="text" id="ruc" name="ruc" inputmode="numeric" placeholder="Ej. 20123456789">
+            <div class="grid-2" style="grid-template-columns: minmax(150px, 44%) 1fr; align-items: start;">
+              <div class="field" style="min-width: 0;">
+                <label for="ruc">RUC (11 dígitos)</label>
+                <div style="display: flex; gap: 5px; align-items: stretch;">
+                  <input type="text" id="ruc" name="ruc" inputmode="numeric" maxlength="11"
+                         autocorrect="off" autocapitalize="off" spellcheck="false"
+                         placeholder="Ej. 20123456789" style="flex: 1; min-width: 0;">
+                  <button type="button" id="btnBuscarRucCheckIn" class="btn-reniec" style="flex-shrink: 0; padding: 0 9px;" title="Buscar RUC en SUNAT / Padrón">🔍</button>
+                </div>
               </div>
-              <div class="field">
+              <div class="field" style="min-width: 0;">
+                <label for="empresa">Nombre de la Empresa / Razón Social</label>
+                <input type="text" id="empresa" name="empresa" list="listaEmpresasGrupal" autocomplete="off" placeholder="Razón social o empresa" style="min-width: 0;">
+                <div id="hintRucCheckIn" class="prev-stay-hint"></div>
+              </div>
+            </div>
+            <div class="grid-3">
+              <div class="field" style="min-width: 0;">
                 <label for="mFact">Monto Factura/Comp. (S/)</label>
                 <input type="text" id="mFact" name="mFact" inputmode="decimal" placeholder="Ej. 90">
               </div>
-              <div class="field">
+              <div class="field" style="min-width: 0;">
                 <label for="adicComp">Adic. por Comp. (S/)</label>
                 <input type="text" id="adicComp" name="adicComp" inputmode="decimal" placeholder="Ej. 10">
               </div>
-            </div>
-            <div class="grid-2">
-              <div class="field">
-                <label for="empresa">Nombre de la Empresa</label>
-                <input type="text" id="empresa" name="empresa" placeholder="Razón social o empresa">
-              </div>
-              <div class="field">
-                <label for="hotelTercerizado">Hotel Tercerizado (Apoyo)</label>
+              <div class="field" style="min-width: 0;">
+                <label for="hotelTercerizado">Hotel Apoyo</label>
                 <select id="hotelTercerizado" name="hotelTercerizado">
                   <option value="">-- Ninguno --</option>
                   <option value="HOSTAL POSADA DEL REY">HOSTAL POSADA DEL REY</option>
@@ -927,9 +946,13 @@
           <input type="text" id="grEmpresa" list="listaEmpresasGrupal" autocomplete="off" placeholder="Razón social (ej. VILLA ADAMS)">
           <datalist id="listaEmpresasGrupal"></datalist>
         </div>
-        <div class="field">
-          <label for="grRuc">RUC</label>
-          <input type="text" id="grRuc" inputmode="numeric" placeholder="Se autocompleta">
+        <div class="field" style="min-width: 0;">
+          <label for="grRuc">RUC (11 dígitos)</label>
+          <div style="display: flex; gap: 5px; align-items: stretch;">
+            <input type="text" id="grRuc" inputmode="numeric" maxlength="11" placeholder="Escribe RUC o empresa" style="flex: 1; min-width: 0;">
+            <button type="button" id="btnBuscarRucGrupal" class="btn-reniec" style="flex-shrink: 0; padding: 0 9px;" title="Buscar RUC en SUNAT">🔍</button>
+          </div>
+          <div id="hintRucGrupal" class="prev-stay-hint"></div>
         </div>
       </div>
       <div class="grid-3">
@@ -1210,14 +1233,270 @@
     const adicCompInput = document.getElementById('adicComp');
     const hotelSelect = document.getElementById('hotelTercerizado');
 
-    if (rucInput) {
-      rucInput.addEventListener('input', () => {
-        if (rucInput.value.trim().length > 0) {
-          const radFact = document.querySelector('input[name="tipoC"][value="Factura"]');
-          if (radFact) radFact.checked = true;
+    const nAcompInput = document.getElementById('nAcomp');
+    const dniAcompInput = document.getElementById('dniAcomp');
+    const btnBuscarDniAcomp = document.getElementById('btnBuscarDniAcomp');
+    const hintAcomp2 = document.getElementById('hintAcomp2');
+    const triple1Input = document.getElementById('triple1');
+    const triple2Input = document.getElementById('triple2');
+    const btnBuscarDniTriple = document.getElementById('btnBuscarDniTriple');
+    const hintAcomp3 = document.getElementById('hintAcomp3');
+    const btnBuscarRucCheckIn = document.getElementById('btnBuscarRucCheckIn');
+    const hintRucCheckIn = document.getElementById('hintRucCheckIn');
+
+    // Buscador RENIEC / Padrón Local para 2do y 3er huésped (sin colapsar acordeón)
+    function configurarBuscadorAcompanante(inpDni, inpNom, btnBuscar, hintEl) {
+      if (!inpDni || !inpNom) return;
+      let timerAcomp = null;
+
+      function ejecutarBusquedaAcomp(forzarRed) {
+        const acompDet = document.getElementById('acompDetails');
+        if (acompDet) acompDet.open = true;
+        const val = inpDni.value.replace(/\D/g, '').trim();
+        if (inpDni.value !== val) inpDni.value = val;
+        if (val.length !== 8) {
+          if (forzarRed && hintEl) {
+            hintEl.textContent = '⚠️ Ingresa un DNI de 8 dígitos.';
+            hintEl.classList.add('visible');
+          }
+          return;
+        }
+        const hLocal = DB_HUESPEDES[val];
+        if (hLocal && hLocal.nombre && !forzarRed) {
+          inpNom.value = hLocal.nombre;
+          if (hintEl) {
+            hintEl.textContent = `✓ Padrón: ${hLocal.nombre}`;
+            hintEl.classList.add('visible');
+          }
+          return;
+        }
+        if (hintEl) {
+          hintEl.textContent = '🔍 Consultando RENIEC...';
+          hintEl.classList.add('visible');
+        }
+        if (btnBuscar) btnBuscar.disabled = true;
+        if (typeof google !== 'undefined' && google.script && google.script.run) {
+          google.script.run
+            .withSuccessHandler((res) => {
+              if (btnBuscar) btnBuscar.disabled = false;
+              if (acompDet) acompDet.open = true;
+              if (inpDni.value.trim() !== val) return;
+              if (res && res.ok && res.nombre) {
+                inpNom.value = res.nombre;
+                if (hintEl) {
+                  hintEl.textContent = `✓ ${res.fuente === 'HISTORIAL_LOCAL' ? 'Padrón' : 'RENIEC'}: ${res.nombre}`;
+                  hintEl.classList.add('visible');
+                }
+              } else if (hintEl) {
+                hintEl.textContent = res && res.error ? `⚠️ ${res.error}` : '⚠️ DNI no encontrado en RENIEC.';
+                hintEl.classList.add('visible');
+              }
+            })
+            .withFailureHandler(() => {
+              if (btnBuscar) btnBuscar.disabled = false;
+              if (hintEl) {
+                hintEl.textContent = '⚠️ Error al conectar con RENIEC.';
+                hintEl.classList.add('visible');
+              }
+            })
+            .consultarDniReniec(val);
+        }
+      }
+
+      inpDni.addEventListener('input', () => {
+        clearTimeout(timerAcomp);
+        const val = inpDni.value.replace(/\D/g, '').trim();
+        if (inpDni.value !== val) inpDni.value = val;
+        if (!val) {
+          if (hintEl) hintEl.classList.remove('visible');
+          return;
+        }
+        const hLocal = DB_HUESPEDES[val];
+        if (hLocal && hLocal.nombre) {
+          inpNom.value = hLocal.nombre;
+          if (hintEl) {
+            hintEl.textContent = `✓ Padrón: ${hLocal.nombre}`;
+            hintEl.classList.add('visible');
+          }
+        } else if (val.length === 8) {
+          timerAcomp = setTimeout(() => ejecutarBusquedaAcomp(false), 300);
+        } else if (hintEl) {
+          hintEl.classList.remove('visible');
+        }
+      });
+
+      inpDni.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.isComposing) {
+          e.preventDefault();
+          e.stopPropagation();
+          ejecutarBusquedaAcomp(true);
+        }
+      });
+
+      if (btnBuscar) {
+        btnBuscar.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          ejecutarBusquedaAcomp(true);
+        });
+      }
+
+      inpNom.addEventListener('input', () => {
+        const nomVal = inpNom.value.trim().toUpperCase();
+        if (nomVal && MAPA_NOMBRES[nomVal]) {
+          const dniEnc = MAPA_NOMBRES[nomVal];
+          inpDni.value = dniEnc;
+          if (hintEl) {
+            hintEl.textContent = `✓ DNI autocompletado: ${dniEnc}`;
+            hintEl.classList.add('visible');
+          }
         }
       });
     }
+
+    configurarBuscadorAcompanante(dniAcompInput, nAcompInput, btnBuscarDniAcomp, hintAcomp2);
+    configurarBuscadorAcompanante(triple2Input, triple1Input, btnBuscarDniTriple, hintAcomp3);
+
+    // Buscador RUC en SUNAT / Padrón para Check-In y Grupal
+    function configurarBuscadorRuc(inpRuc, inpEmp, btnRuc, hintEl, marcarRadioFactura) {
+      if (!inpRuc || !inpEmp) return;
+      let timerRuc = null;
+
+      function buscarRucEnCatalogoMemoria(rucVal) {
+        for (const nomEmp of Object.keys(EMPRESAS_CAT || {})) {
+          const item = EMPRESAS_CAT[nomEmp];
+          if (item && String(item.ruc || '').trim() === rucVal) {
+            return nomEmp;
+          }
+        }
+        return '';
+      }
+
+      function ejecutarBusquedaRuc(forzarAviso) {
+        const empDet = document.getElementById('empresaDetails');
+        if (marcarRadioFactura && empDet) empDet.open = true;
+        const rucVal = inpRuc.value.replace(/\D/g, '').trim();
+        if (inpRuc.value !== rucVal) inpRuc.value = rucVal;
+        if (rucVal.length > 0 && marcarRadioFactura) {
+          const radFact = document.querySelector('input[name="tipoC"][value="Factura"]');
+          if (radFact) radFact.checked = true;
+        }
+        if (rucVal.length !== 11 || !/^(10|15|17|20)\d{9}$/.test(rucVal)) {
+          if (forzarAviso && hintEl) {
+            hintEl.textContent = '⚠️ Ingresa un RUC válido de 11 dígitos (10 o 20).';
+            hintEl.classList.add('visible');
+          }
+          return;
+        }
+        const empMem = buscarRucEnCatalogoMemoria(rucVal);
+        if (empMem && !forzarAviso) {
+          inpEmp.value = empMem;
+          if (hintEl) {
+            hintEl.textContent = `✓ Padrón Empresas: ${empMem}`;
+            hintEl.classList.add('visible');
+          }
+          return;
+        }
+        if (hintEl) {
+          hintEl.textContent = '🔍 Consultando RUC en SUNAT...';
+          hintEl.classList.add('visible');
+        }
+        if (btnRuc) btnRuc.disabled = true;
+        if (typeof google !== 'undefined' && google.script && google.script.run) {
+          google.script.run
+            .withSuccessHandler((res) => {
+              if (btnRuc) btnRuc.disabled = false;
+              if (marcarRadioFactura && empDet) empDet.open = true;
+              if (inpRuc.value.trim() !== rucVal) return;
+              const razon = res && (res.razonSocial || res.empresa || res.nombre);
+              if (res && res.ok && razon) {
+                inpEmp.value = razon;
+                EMPRESAS_CAT[String(razon).toUpperCase()] = { ruc: rucVal, proyectos: [] };
+                const estadoExtra = (res.estado && String(res.estado).toUpperCase() !== 'ACTIVO') ? ` (${res.estado})` : '';
+                if (hintEl) {
+                  hintEl.textContent = `✓ SUNAT: ${razon}${estadoExtra}`;
+                  hintEl.classList.add('visible');
+                }
+              } else if (hintEl) {
+                hintEl.textContent = res && res.error ? `⚠️ ${res.error}` : '⚠️ RUC no encontrado en SUNAT (escribe la empresa manualmente).';
+                hintEl.classList.add('visible');
+              }
+            })
+            .withFailureHandler(() => {
+              if (btnRuc) btnRuc.disabled = false;
+              if (hintEl) {
+                hintEl.textContent = '⚠️ Error al consultar SUNAT.';
+                hintEl.classList.add('visible');
+              }
+            })
+            .consultarRucSunat(rucVal);
+        }
+      }
+
+      inpRuc.addEventListener('input', () => {
+        clearTimeout(timerRuc);
+        const rucVal = inpRuc.value.replace(/\D/g, '').trim();
+        if (inpRuc.value !== rucVal) inpRuc.value = rucVal;
+        if (inpRuc.dataset.lastRuc !== rucVal) {
+          inpEmp.value = '';
+          inpRuc.dataset.lastRuc = rucVal;
+        }
+        if (rucVal.length > 0 && marcarRadioFactura) {
+          const radFact = document.querySelector('input[name="tipoC"][value="Factura"]');
+          if (radFact) radFact.checked = true;
+        }
+        if (!rucVal) {
+          if (hintEl) hintEl.classList.remove('visible');
+          return;
+        }
+        const empMem = buscarRucEnCatalogoMemoria(rucVal);
+        if (empMem) {
+          inpEmp.value = empMem;
+          if (hintEl) {
+            hintEl.textContent = `✓ Padrón Empresas: ${empMem}`;
+            hintEl.classList.add('visible');
+          }
+        } else if (rucVal.length === 11) {
+          timerRuc = setTimeout(() => ejecutarBusquedaRuc(false), 300);
+        } else if (hintEl) {
+          hintEl.classList.remove('visible');
+        }
+      });
+
+      inpRuc.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.isComposing) {
+          e.preventDefault();
+          e.stopPropagation();
+          ejecutarBusquedaRuc(true);
+        }
+      });
+
+      if (btnRuc) {
+        btnRuc.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          ejecutarBusquedaRuc(true);
+        });
+      }
+
+      inpEmp.addEventListener('input', () => {
+        const key = String(inpEmp.value || '').trim().toUpperCase();
+        const cat = EMPRESAS_CAT && EMPRESAS_CAT[key];
+        if (cat && cat.ruc && !inpRuc.value.trim()) {
+          inpRuc.value = cat.ruc;
+          if (marcarRadioFactura) {
+            const radFact = document.querySelector('input[name="tipoC"][value="Factura"]');
+            if (radFact) radFact.checked = true;
+          }
+          if (hintEl) {
+            hintEl.textContent = `✓ RUC autocompletado: ${cat.ruc}`;
+            hintEl.classList.add('visible');
+          }
+        }
+      });
+    }
+
+    configurarBuscadorRuc(rucInput, empresaInput, btnBuscarRucCheckIn, hintRucCheckIn, true);
 
     // Elementos Continuar Estancia
     const continuarForm = document.getElementById('continuarForm');
@@ -1233,6 +1512,9 @@
     const panelGrupal = document.getElementById('panelGrupal');
     const grEmpresa = document.getElementById('grEmpresa');
     const grRuc = document.getElementById('grRuc');
+    const btnBuscarRucGrupal = document.getElementById('btnBuscarRucGrupal');
+    const hintRucGrupal = document.getElementById('hintRucGrupal');
+    configurarBuscadorRuc(grRuc, grEmpresa, btnBuscarRucGrupal, hintRucGrupal, false);
     const grProyecto = document.getElementById('grProyecto');
     const grFechaIn = document.getElementById('grFechaIn');
     const grFechaOut = document.getElementById('grFechaOut');
@@ -1479,9 +1761,46 @@
       resumenContinuarBox.style.display = 'none';
     }
 
-    // Autocompletar campos cuando se encuentra cliente por DNI o por Nombre (sin cartel de visitas)
+    let ultimoDniAutocompletado = '';
+
+    function limpiarCamposAutocompletadosCliente() {
+      celularInput.value = '';
+      rucInput.value = '';
+      empresaInput.value = '';
+      mFactInput.value = '';
+      if (adicCompInput) adicCompInput.value = '';
+      if (hintRucCheckIn) hintRucCheckIn.classList.remove('visible');
+      const empDet = document.getElementById('empresaDetails');
+      if (empDet) empDet.open = false;
+      const radioSinComp = document.querySelector('input[name="tipoC"][value=""]');
+      if (radioSinComp) radioSinComp.checked = true;
+    }
+
+    // Autocompletar campos cuando se encuentra cliente por DNI o por Nombre (sin contaminar empresa/RUC ocultos)
+    function seleccionarRegionRecurrente(regGuardada) {
+      if (!regSelect) return;
+      const val = String(regGuardada || '').trim();
+      if (!val) {
+        regSelect.value = '';
+        return;
+      }
+      const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+      const target = norm(val);
+      for (let i = 0; i < regSelect.options.length; i++) {
+        const opt = regSelect.options[i];
+        if (opt.value && (opt.value === val || norm(opt.value) === target || norm(opt.textContent) === target)) {
+          regSelect.value = opt.value;
+          regSelect.classList.remove('campo-invalido');
+          return;
+        }
+      }
+    }
+
+    // Autocompletar campos cuando se encuentra cliente recurrente por DNI o por Nombre (incluyendo Procedencia, RUC y Empresa editables por defecto)
     function rellenarDatosCliente(dniVal, h) {
       if (!h) return;
+      limpiarCamposAutocompletadosCliente();
+      ultimoDniAutocompletado = String(dniVal || '').trim();
       if (dniInput.value.trim() !== dniVal) {
         dniInput.value = dniVal;
         dniInput.classList.remove('campo-invalido');
@@ -1496,22 +1815,74 @@
         document.getElementById('sexoM').checked = true;
       }
       if (h.nac) nacSelect.value = h.nac;
-      if (h.reg) regSelect.value = h.reg;
+      seleccionarRegionRecurrente(h.reg);
       if (h.mot) motSelect.value = h.mot;
-      if (h.celular) celularInput.value = h.celular;
-      if (h.ruc) rucInput.value = h.ruc;
-      if (h.empresa) empresaInput.value = h.empresa;
+      celularInput.value = h.celular || '';
       if (h.tarifa && !tarifaInput.value) {
         tarifaInput.value = h.tarifa;
         tarifaInput.classList.remove('campo-invalido');
         calcularTotalesCheckIn();
       }
-      // Mostrar referencia discreta de tarifa/habitación anterior igual que "Buscar Cliente Registrado"
+
+      // Resolver RUC y Empresa recurrentes (cruzando con EMPRESAS_CAT si hiciera falta)
+      let rucRec = String(h.ruc || '').replace(/\D/g, '').trim();
+      let empRec = String(h.empresa || '').trim();
+      if (empRec && !rucRec && EMPRESAS_CAT && EMPRESAS_CAT[empRec.toUpperCase()]) {
+        rucRec = String(EMPRESAS_CAT[empRec.toUpperCase()].ruc || '').trim();
+      } else if (rucRec && !empRec && EMPRESAS_CAT) {
+        for (const nomK of Object.keys(EMPRESAS_CAT)) {
+          if (EMPRESAS_CAT[nomK] && String(EMPRESAS_CAT[nomK].ruc || '').trim() === rucRec) {
+            empRec = nomK;
+            break;
+          }
+        }
+      }
+
+      // Cargar RUC y Empresa directamente en los inputs editables para que se guarden por defecto
+      if (rucRec || empRec) {
+        rucInput.value = rucRec;
+        empresaInput.value = empRec;
+        const empDet = document.getElementById('empresaDetails');
+        if (empDet) empDet.open = true;
+        if (hintRucCheckIn) {
+          hintRucCheckIn.textContent = '✓ RUC y Empresa de cliente frecuente cargados (puedes modificarlos aquí).';
+          hintRucCheckIn.classList.add('visible');
+        }
+      }
+
       const partesInfo = [];
       if (h.hab) partesInfo.push(`Última Hab: ${h.hab}`);
-      if (h.tarifa) partesInfo.push(`Tarifa anterior: S/ ${h.tarifa}`);
-      if (partesInfo.length > 0) {
-        prevStayHint.textContent = '📋 ' + partesInfo.join(' • ');
+      if (h.tarifa) partesInfo.push(`Tarifa ant.: S/ ${h.tarifa}`);
+      if (h.reg) partesInfo.push(`Procedencia: ${h.reg}`);
+      prevStayHint.innerHTML = '';
+      if (partesInfo.length > 0 || empRec || rucRec) {
+        const spanTxt = document.createElement('span');
+        spanTxt.textContent = partesInfo.length > 0 ? ('📋 ' + partesInfo.join(' • ')) : '📋 Cliente frecuente';
+        prevStayHint.appendChild(spanTxt);
+        if (empRec || rucRec) {
+          const empLabel = (empRec && rucRec) ? `${empRec} (RUC ${rucRec})` : (empRec || `RUC ${rucRec}`);
+          const badgeEmp = document.createElement('span');
+          badgeEmp.style.cssText = 'display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;background:#dcfce7;border:1px solid #16a34a;color:#15803d;font-weight:700;font-size:10.5px;';
+          badgeEmp.textContent = `🏢 ${empLabel}`;
+          prevStayHint.appendChild(badgeEmp);
+
+          const btnQuitarEmp = document.createElement('button');
+          btnQuitarEmp.type = 'button';
+          btnQuitarEmp.style.cssText = 'margin-left:5px;padding:1px 6px;border-radius:4px;border:1px solid #cbd5e1;background:#fff;color:#475569;font-weight:700;font-size:10px;cursor:pointer;';
+          btnQuitarEmp.textContent = '✕ Sin empresa hoy';
+          btnQuitarEmp.title = 'Limpiar RUC y Empresa para esta estancia';
+          btnQuitarEmp.addEventListener('click', () => {
+            rucInput.value = '';
+            empresaInput.value = '';
+            if (hintRucCheckIn) hintRucCheckIn.classList.remove('visible');
+            badgeEmp.style.background = '#f1f5f9';
+            badgeEmp.style.borderColor = '#94a3b8';
+            badgeEmp.style.color = '#64748b';
+            badgeEmp.textContent = '🏢 Sin empresa en esta estancia';
+            btnQuitarEmp.remove();
+          });
+          prevStayHint.appendChild(btnQuitarEmp);
+        }
         prevStayHint.classList.add('visible');
       } else {
         prevStayHint.classList.remove('visible');
@@ -1523,6 +1894,7 @@
       if (val.length !== 8 || isNaN(val)) return;
       if (DB_HUESPEDES[val]) return;
 
+      limpiarCamposAutocompletadosCliente();
       prevStayHint.textContent = '🔍 Consultando APIsPERU / RENIEC...';
       prevStayHint.classList.add('visible');
       if (btnBuscarDni) btnBuscarDni.disabled = true;
@@ -1533,11 +1905,18 @@
             if (btnBuscarDni) btnBuscarDni.disabled = false;
             if (dniInput.value.trim() !== val) return;
             if (res && res.ok && res.nombre) {
-              nombreInput.value = res.nombre;
-              if (nacSelect) nacSelect.value = 'Perú';
-              nombreInput.classList.remove('campo-invalido');
-              prevStayHint.textContent = `✓ RENIEC: ${res.nombre}`;
-              prevStayHint.classList.add('visible');
+              if (res.fuente === 'PADRON_LOCAL' || res.ruc || res.empresa || res.reg) {
+                DB_HUESPEDES[val] = res;
+                rellenarDatosCliente(val, res);
+              } else {
+                limpiarCamposAutocompletadosCliente();
+                ultimoDniAutocompletado = val;
+                nombreInput.value = res.nombre;
+                if (nacSelect) nacSelect.value = 'Perú';
+                nombreInput.classList.remove('campo-invalido');
+                prevStayHint.textContent = `✓ RENIEC: ${res.nombre}`;
+                prevStayHint.classList.add('visible');
+              }
               habSelect.focus();
             } else {
               prevStayHint.textContent = res && res.error ? `⚠️ ${res.error}` : '⚠️ DNI no encontrado en RENIEC.';
@@ -1556,6 +1935,11 @@
     dniInput.addEventListener('input', () => {
       const val = dniInput.value.trim();
       clearTimeout(timerDniReniec);
+      if (ultimoDniAutocompletado && val !== ultimoDniAutocompletado) {
+        limpiarCamposAutocompletadosCliente();
+        nombreInput.value = '';
+        ultimoDniAutocompletado = '';
+      }
       if (!val) {
         prevStayHint.classList.remove('visible');
         return;
@@ -1709,15 +2093,19 @@
     }
 
     function limpiarFormularioCheckIn() {
+      ultimoDniAutocompletado = '';
       checkInForm.reset();
       mostrarSelectorHabitacion();
       nacSelect.value = 'Perú';
-      regSelect.value = 'Lima';
+      regSelect.value = '';
       motSelect.value = 'Vacaciones, recreo u ocio';
       document.getElementById('sexoM').checked = true;
       document.querySelector('input[name="tipoC"][value=""]').checked = true;
       document.getElementById('acompDetails').open = false;
       document.getElementById('empresaDetails').open = false;
+      if (hintAcomp2) hintAcomp2.classList.remove('visible');
+      if (hintAcomp3) hintAcomp3.classList.remove('visible');
+      if (hintRucCheckIn) hintRucCheckIn.classList.remove('visible');
       servAdicMontoInput.value = '';
       servAdicMetodoSelect.value = 'Cargar a Habitación';
       if (FECHA_HOY) fechaInInput.value = FECHA_HOY;
@@ -1775,18 +2163,19 @@
         hotelTercerizado: hotelSelect.value
       };
 
-      // Actualizar caché en RAM
+      // Actualizar caché en RAM conservando historial recurrente si un campo opcional quedó vacío
+      const prevH = DB_HUESPEDES[payload.dni] || {};
       DB_HUESPEDES[payload.dni] = {
         nombre: payload.nombre,
         sexo: payload.sexo,
         nac: payload.nac,
-        reg: payload.reg,
+        reg: payload.reg || prevH.reg || '',
         mot: payload.mot,
-        tarifa: payload.tarifa,
-        hab: payload.hab,
-        celular: payload.celular,
-        ruc: payload.ruc,
-        empresa: payload.empresa,
+        tarifa: payload.tarifa || prevH.tarifa || '',
+        hab: payload.hab || prevH.hab || '',
+        celular: payload.celular || prevH.celular || '',
+        ruc: payload.ruc || prevH.ruc || '',
+        empresa: payload.empresa || prevH.empresa || '',
         visitas: prevVisitas + 1
       };
       MAPA_NOMBRES[payload.nombre.toUpperCase()] = payload.dni;
@@ -1931,8 +2320,13 @@
       }
 
       const payloadCont = {
-        filaAnterior: est.fila,
-        idAnterior: est.id,
+        estanciaUuid: est.estanciaUuid || '',
+        filaAnterior: est.fila || 0,
+        idAnterior: est.id || '',
+        habAnterior: est.hab || '',
+        fechaInAnterior: est.fechaIn || '',
+        dniAnterior: est.dni || '',
+        huespedAnterior: est.nombre || '',
         habNueva: contHabNueva.value,
         tarifaNueva: parseFloat(contTarifaNueva.value) || Number(est.tarifa) || 0,
         fechaInNueva: contFechaIn.value,
@@ -1980,17 +2374,21 @@
       }
       if (ctx.tab === 'continuar') {
         tabBtnContinuar.click();
+        estanciaActivaSelect.value = '';
+        contHabBuscar.value = '';
+        resumenContinuarBox.style.display = 'none';
         const hab = String(ctx.hab || '').trim();
+        const checkInCtx = String(ctx.checkIn || '').trim();
         if (hab && ESTANCIAS_ACTIVAS && ESTANCIAS_ACTIVAS.length > 0) {
           let idx = -1;
-          if (ctx.estanciaUuid) {
-            idx = ESTANCIAS_ACTIVAS.findIndex((e) => e.estanciaUuid && String(e.estanciaUuid) === String(ctx.estanciaUuid));
+          if (checkInCtx) {
+            idx = ESTANCIAS_ACTIVAS.findIndex((e) => String(e.hab).trim() === hab && String(e.fechaIn || '').trim() === checkInCtx);
+          }
+          if (idx === -1 && ctx.estanciaUuid) {
+            idx = ESTANCIAS_ACTIVAS.findIndex((e) => String(e.hab).trim() === hab && e.estanciaUuid && String(e.estanciaUuid) === String(ctx.estanciaUuid));
           }
           if (idx === -1 && ctx.idEstancia) {
-            idx = ESTANCIAS_ACTIVAS.findIndex((e) => e.id && String(e.id) === String(ctx.idEstancia));
-          }
-          if (idx === -1 && ctx.fila) {
-            idx = ESTANCIAS_ACTIVAS.findIndex((e) => e.fila && Number(e.fila) === Number(ctx.fila));
+            idx = ESTANCIAS_ACTIVAS.findIndex((e) => String(e.hab).trim() === hab && e.id && String(e.id) === String(ctx.idEstancia));
           }
           if (idx === -1) {
             idx = ESTANCIAS_ACTIVAS.findIndex((e) => String(e.hab).trim() === hab);
@@ -2004,6 +2402,7 @@
             if (blq) blq.style.display = 'none';
             if (btnM) btnM.style.display = 'inline';
           } else {
+            contHabBuscar.value = hab;
             mostrarBusquedaManualContinuar();
           }
         } else if (!hab) {
@@ -2013,6 +2412,9 @@
         tabBtnCheckIn.click();
         const hab = String(ctx.hab || '').trim();
         if (hab && HABITACIONES && HABITACIONES.length > 0 && habSelect) {
+          if (String(habSelect.value || '').trim() !== hab) {
+            limpiarFormularioCheckIn();
+          }
           habSelect.value = hab;
           habSelect.dispatchEvent(new Event('change', { bubbles: true }));
         }
@@ -2111,6 +2513,14 @@
       }
     });
     poner(); // segunda pasada: pisa cualquier autocompletado disparado por los eventos
+    try {
+      if (data.nAcomp || data.dniAcomp || data.triple1 || data.triple2) {
+        var acD = document.getElementById('acompDetails'); if (acD) acD.open = true;
+      }
+      if (data.ruc || data.empresa || data.mFact) {
+        var emD = document.getElementById('empresaDetails'); if (emD) emD.open = true;
+      }
+    } catch (e) {}
     try { if (typeof calcularTotalesCheckIn === 'function') calcularTotalesCheckIn(); } catch (e) {}
     try { if (typeof actualizarEstadoYapeCheckIn === 'function') actualizarEstadoYapeCheckIn(); } catch (e) {}
     setTimeout(function () { restaurando = false; }, 300);

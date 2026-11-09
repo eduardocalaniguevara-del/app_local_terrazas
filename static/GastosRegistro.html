@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Registro de Gastos — {{NOMBRE_HOTEL}}</title>
+  <title>Registro de Gastos — Hostal Óvalo</title>
   <style>
     :root {
       --gasto: #c2410c;
@@ -172,6 +172,14 @@
         </select>
         <span class="error-hint">Elige una categoría.</span>
       </div>
+
+      <div class="field" id="boxPersonalGasto" style="display:none;">
+        <label for="personalGasto">Personal <span class="req" id="reqPersonalGasto">*</span></label>
+        <select id="personalGasto">
+          <option value="">-- ¿A qué personal corresponde? --</option>
+        </select>
+        <span class="error-hint">Elige a qué personal se le registra el adelanto.</span>
+      </div>
     </fieldset>
 
     <fieldset>
@@ -245,6 +253,17 @@
     const tipoCompGasto = document.getElementById('tipoCompGasto');
     const nroCompGasto = document.getElementById('nroCompGasto');
     const responsableGasto = document.getElementById('responsableGasto');
+    const personalGasto = document.getElementById('personalGasto');
+    const boxPersonalGasto = document.getElementById('boxPersonalGasto');
+    let PERSONAL_OPC = [];
+    const esAdelanto = () => /^adelanto/i.test(categoriaGasto.value || '');
+    const pideCuentaPersonal = () => /adelanto|sueldo|personal/i.test(categoriaGasto.value || '');
+    function actualizarPersonalGasto() {
+      boxPersonalGasto.style.display = pideCuentaPersonal() ? '' : 'none';
+      document.getElementById('reqPersonalGasto').style.display = esAdelanto() ? '' : 'none';
+      if (!pideCuentaPersonal()) personalGasto.value = '';
+    }
+    categoriaGasto.addEventListener('change', actualizarPersonalGasto);
     const btnSubmitGasto = document.getElementById('btnSubmitGasto');
     const statusBanner = document.getElementById('statusBanner');
     const syncInfo = document.getElementById('syncInfo');
@@ -330,6 +349,13 @@
 
       llenarSelect(categoriaGasto, CATEGORIAS, '-- Seleccionar Categoría --');
 
+      PERSONAL_OPC = res.personalOpciones || [];
+      const persActual = personalGasto.value;
+      personalGasto.innerHTML = '<option value="">-- ¿A qué personal corresponde? --</option>' +
+        PERSONAL_OPC.map((p) => `<option value="${esc(p.valor)}">${esc(p.etiqueta)}</option>`).join('');
+      if (persActual) personalGasto.value = persActual;
+      actualizarPersonalGasto();
+
       const metodoActual = metodoGasto.value || 'Efectivo';
       const metodos = METODOS.length ? METODOS.slice() : ['Efectivo'];
       if (metodos.indexOf('Efectivo') === -1) metodos.unshift('Efectivo');
@@ -363,7 +389,7 @@
       lista.innerHTML = GASTOS_HOY.map((g) => `
         <li>
           <span class="lg-hora">${esc(g.hora || '--:--')}</span>
-          <span class="lg-desc">${esc(g.descripcion)}<span class="lg-meta">${esc(g.categoria)} • ${esc(g.metodo)}${g.responsable ? ' • ' + esc(g.responsable) : ''}</span></span>
+          <span class="lg-desc">${esc(g.descripcion)}<span class="lg-meta">${esc(g.categoria)} • ${esc(g.metodo)}${g.personal ? ' • 👤 ' + esc(g.personal) : ''}${g.responsable ? ' • ' + esc(g.responsable) : ''}</span></span>
           <span class="lg-monto">${fmt(g.monto)}</span>
         </li>`).join('');
     }
@@ -389,6 +415,8 @@
       descGasto.value = '';
       montoGasto.value = '';
       categoriaGasto.value = '';
+      personalGasto.value = '';
+      actualizarPersonalGasto();
       tipoCompGasto.value = '';
       nroCompGasto.value = '';
       metodoGasto.value = 'Efectivo';
@@ -413,9 +441,14 @@
           if (!invalido) invalido = el;
         }
       });
+      if (esAdelanto() && !personalGasto.value) {
+        personalGasto.classList.add('campo-invalido');
+        if (!invalido) invalido = personalGasto;
+      }
       if (invalido) { invalido.focus(); return; }
 
       const payload = {
+        personal: pideCuentaPersonal() ? personalGasto.value : '',
         fecha: fechaGasto.value,
         descripcion: descGasto.value.trim(),
         monto: leerMonto(),

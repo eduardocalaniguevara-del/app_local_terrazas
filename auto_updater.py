@@ -197,9 +197,13 @@ def _verificar_recarga_local_mtime() -> bool:
     global _LAST_DL_MTIME
     try:
         dl_path = BASE_APP_DIR / "domain_logic.py"
-        if not dl_path.exists():
-            return False
-        mt = dl_path.stat().st_mtime
+        hl_path = BASE_APP_DIR / "horario_logic.py"
+        tm_path = BASE_APP_DIR / "tablet_manager.py"
+        mt = max(
+            dl_path.stat().st_mtime if dl_path.exists() else 0.0,
+            hl_path.stat().st_mtime if hl_path.exists() else 0.0,
+            tm_path.stat().st_mtime if tm_path.exists() else 0.0,
+        )
         if _LAST_DL_MTIME == 0.0:
             _LAST_DL_MTIME = mt
             return False
@@ -214,24 +218,34 @@ def _verificar_recarga_local_mtime() -> bool:
 
 def recargar_en_memoria_sin_cortes() -> None:
     """
-    Recarga domain_logic directamente en memoria y actualiza el timestamp
+    Recarga domain_logic y horario_logic directamente en memoria y actualiza el timestamp
     de PanelDisponibilidad.html para que el navegador refresque la vista automáticamente.
     """
     global _LAST_DL_MTIME
     try:
         if "domain_logic" in sys.modules:
             importlib.reload(sys.modules["domain_logic"])
+        if "horario_logic" in sys.modules:
+            importlib.reload(sys.modules["horario_logic"])
+        if "tablet_manager" in sys.modules:
+            importlib.reload(sys.modules["tablet_manager"])
         dl_path = BASE_APP_DIR / "domain_logic.py"
-        if dl_path.exists():
-            _LAST_DL_MTIME = dl_path.stat().st_mtime
+        hl_path = BASE_APP_DIR / "horario_logic.py"
+        tm_path = BASE_APP_DIR / "tablet_manager.py"
+        _LAST_DL_MTIME = max(
+            dl_path.stat().st_mtime if dl_path.exists() else 0.0,
+            hl_path.stat().st_mtime if hl_path.exists() else 0.0,
+            tm_path.stat().st_mtime if tm_path.exists() else 0.0,
+        )
     except Exception as exc:
-        print(f"[AUTO-UPDATER] Aviso recargando domain_logic en memoria: {exc}")
+        print(f"[AUTO-UPDATER] Aviso recargando módulos en memoria: {exc}")
 
     try:
-        panel_html = BASE_APP_DIR / "static" / "PanelDisponibilidad.html"
-        if panel_html.exists():
-            now_ts = time.time()
-            os.utime(panel_html, (now_ts, now_ts))
+        now_ts = time.time()
+        for fname_ui in ("PanelDisponibilidad.html", "TabletKiosco.html"):
+            f_ui = BASE_APP_DIR / "static" / fname_ui
+            if f_ui.exists():
+                os.utime(f_ui, (now_ts, now_ts))
     except Exception:
         pass
 

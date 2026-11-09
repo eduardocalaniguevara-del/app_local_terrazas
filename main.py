@@ -17,9 +17,9 @@ _APP_DIR = str(Path(__file__).resolve().parent)
 if _APP_DIR not in sys.path:
     sys.path.insert(0, _APP_DIR)
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -56,6 +56,8 @@ from sunat_wsp_service import (
     consultar_dni_local_o_reniec,
     consultar_ruc_local_o_sunat,
     ejecutar_orden_sunat_wsp,
+    listar_jobs_sunat_recientes,
+    obtener_estado_job_sunat,
 )
 from sync_engine import process_sync_queue, pull_from_sheets
 from auto_updater import (
@@ -75,6 +77,9 @@ _sync_lock = threading.Lock()
 def _is_bootstrap_completed() -> bool:
     conn = get_connection()
     try:
+        r_flag = conn.execute("SELECT valor FROM estado_sistema WHERE clave = 'bootstrap_full_v2'").fetchone()
+        if not r_flag or str(r_flag["valor"] or "") != "1":
+            return False
         row = conn.execute("SELECT COUNT(*) AS c FROM estancias").fetchone()
         return bool(row and int(row["c"]) > 0)
     except Exception:
@@ -122,10 +127,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Hotel Óvalo Mariátegui — Recepción Local Offline-First",
+    title="Hotel Terrazas de Villa — Recepción Local Offline-First",
     version="1.0.0",
     lifespan=lifespan,
 )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -142,6 +148,21 @@ class RpcPayload(BaseModel):
 
 
 WRITE_METHODS = {
+    "editarEstanciaBDAdmin",
+    "eliminarEstanciaBDAdmin",
+    "editarGastoBDAdmin",
+    "eliminarGastoBDAdmin",
+    "editarVentaTiendaBDAdmin",
+    "eliminarVentaTiendaBDAdmin",
+    "editarPagoBDAdmin",
+    "eliminarPagoBDAdmin",
+    "marcarAsistenciaHorario",
+    "editarCeldaHorario",
+    "guardarPersonalConfig",
+    "guardarLiquidacionHorario",
+    "registrarVisitaPase",
+    "cambiarEstadoVisitaPase",
+    "eliminarVisitaPase",
     "guardarCheckInDesdeApp",
     "procesarCheckInApp",
     "guardarPagoPosteriorDesdeApp",
@@ -159,6 +180,10 @@ WRITE_METHODS = {
     "guardarModificacionEstancia",
     "actualizarEstadoComprobanteDesdePanel",
     "guardarConteoVitrina",
+    "registrarCompraTienda",
+    "cerrarCompraPendienteTienda",
+    "registrarMovimientoTienda",
+    "anularMovimientoAlmacen",
     "guardarCheckInGrupalEmpresa",
     "guardarPagoMasivo",
 }
@@ -295,8 +320,9 @@ def _obtener_vista_formulario_local(nombre_vista: str) -> str:
 @app.get("/", response_class=HTMLResponse)
 def index():
     panel_path = STATIC_DIR / "PanelDisponibilidad.html"
+    js_sunat_path = STATIC_DIR / "js" / "facturacion_sunat.js"
     html = panel_path.read_text(encoding="utf-8")
-    mtime_ui = int(panel_path.stat().st_mtime)
+    mtime_ui = int(max(panel_path.stat().st_mtime, js_sunat_path.stat().st_mtime if js_sunat_path.exists() else 0))
     html = html.replace("{{NOMBRE_HOTEL}}", NOMBRE_HOTEL)
     html = html.replace('/static/js/api_bridge.js"', f'/static/js/api_bridge.js?v={mtime_ui}"')
     html = html.replace('/static/js/facturacion_sunat.js"', f'/static/js/facturacion_sunat.js?v={mtime_ui}"')
@@ -305,6 +331,21 @@ def index():
         media_type="text/html; charset=utf-8",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )
+
+
+@app.get("/api/cuentas/pdf")
+def api_descargar_pdf_cuenta_hab(hab: str = "", modo: str = "ingreso", fecha: str = "", estanciaUuid: str = ""):
+    import pases_logic as pl
+    try:
+        pdf_path = pl.generar_pdf_cuenta_hab_local({"hab": hab, "modo": modo, "fecha": fecha, "estanciaUuid": estanciaUuid})
+        return FileResponse(
+            str(pdf_path),
+            media_type="application/pdf",
+            filename=pdf_path.name,
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/sync/status")
@@ -335,19 +376,26 @@ def api_sync_trigger():
     return {"status": "TRIGGERED", "syncStatus": obtener_estado_red_cola()}
 
 
+@app.get("/api/sunat/captura/{filename}")
+def api_sunat_captura(filename: str):
+    safe_name = Path(filename).name
+    cap_path = Path(r"C:\Hostal_Sistema\capturas") / safe_name
+    if not cap_path.is_file():
+        raise HTTPException(status_code=404, detail="Captura no encontrada")
+    return FileResponse(str(cap_path), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/sunat/jobs")
+def api_sunat_jobs():
+    return JSONResponse(content={"jobs": []}, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
 @app.post("/api/sunat/orden")
 def api_sunat_orden(payload: Dict[str, Any]):
-    try:
-        res = ejecutar_orden_sunat_wsp(payload)
-        if res.get("exito"):
-            _sync_wakeup_event.set()
-        res["syncStatus"] = obtener_estado_red_cola()
-        return JSONResponse(content=res)
-    except Exception as exc:
-        return JSONResponse(
-            status_code=400,
-            content={"exito": False, "mensaje": str(exc), "syncStatus": obtener_estado_red_cola()},
-        )
+    return JSONResponse(
+        status_code=400,
+        content={"status": "ERROR", "exito": False, "error": "Emisión automática SUNAT / WhatsApp deshabilitada en Hotel Terrazas.", "mensaje": "Emisión automática SUNAT / WhatsApp deshabilitada en Hotel Terrazas."},
+    )
 
 
 @app.post("/api/rpc/{method_name}")
@@ -411,12 +459,76 @@ def api_rpc_handler(method_name: str, body: RpcPayload):
             res = dl.obtener_datos_vitrina_local()
         elif method_name == "guardarConteoVitrina":
             res = dl.guardar_conteo_vitrina_local(args[0] if args else {})
+        elif method_name == "verificarClaveGestionTienda":
+            res = dl.verificar_clave_gestion_tienda_local(args[0] if args else {})
+        elif method_name == "registrarCompraTienda":
+            res = dl.registrar_compra_tienda_local(args[0] if args else {})
+        elif method_name == "cerrarCompraPendienteTienda":
+            res = dl.cerrar_compra_pendiente_tienda_local(args[0] if args else {})
+        elif method_name == "registrarMovimientoTienda":
+            res = dl.registrar_movimiento_tienda_local(args[0] if args else {})
+        elif method_name == "anularMovimientoAlmacen":
+            res = dl.anular_movimiento_almacen_local(args[0] if args else {})
+        elif method_name == "obtenerRegistroEstanciasBD":
+            res = dl.obtener_registro_estancias_bd_local(args[0] if args else {})
+        elif method_name == "editarEstanciaBDAdmin":
+            res = dl.editar_estancia_bd_admin_local(args[0] if args else {})
+        elif method_name == "eliminarEstanciaBDAdmin":
+            res = dl.eliminar_estancia_bd_admin_local(args[0] if args else {})
+        elif method_name == "obtenerRegistroGastosBD":
+            res = dl.obtener_registro_gastos_bd_local(args[0] if args else {})
+        elif method_name == "editarGastoBDAdmin":
+            res = dl.editar_gasto_bd_admin_local(args[0] if args else {})
+        elif method_name == "eliminarGastoBDAdmin":
+            res = dl.eliminar_gasto_bd_admin_local(args[0] if args else {})
+        elif method_name == "obtenerRegistroVentasTiendaBD":
+            res = dl.obtener_registro_ventas_tienda_bd_local(args[0] if args else {})
+        elif method_name == "editarVentaTiendaBDAdmin":
+            res = dl.editar_venta_tienda_bd_admin_local(args[0] if args else {})
+        elif method_name == "eliminarVentaTiendaBDAdmin":
+            res = dl.eliminar_venta_tienda_bd_admin_local(args[0] if args else {})
+        elif method_name == "obtenerRegistroPagosBD":
+            res = dl.obtener_registro_pagos_bd_local(args[0] if args else {})
+        elif method_name == "editarPagoBDAdmin":
+            res = dl.editar_pago_bd_admin_local(args[0] if args else {})
+        elif method_name == "eliminarPagoBDAdmin":
+            res = dl.eliminar_pago_bd_admin_local(args[0] if args else {})
+        elif method_name == "obtenerHorario":
+            import horario_logic as hl
+            res = hl.obtener_horario_local(args[0] if args else {})
+        elif method_name == "marcarAsistenciaHorario":
+            import horario_logic as hl
+            res = hl.marcar_asistencia_local(args[0] if args else {})
+        elif method_name == "editarCeldaHorario":
+            import horario_logic as hl
+            res = hl.editar_celda_horario_local(args[0] if args else {})
+        elif method_name == "verificarClaveCuentasHorario":
+            import horario_logic as hl
+            res = hl.verificar_clave_cuentas_horario_local(args[0] if args else {})
+        elif method_name == "obtenerLiquidacionHorario":
+            import horario_logic as hl
+            res = hl.obtener_liquidacion_horario_local(args[0] if args else {})
+        elif method_name == "obtenerAuditoriaHorario":
+            import horario_logic as hl
+            res = hl.obtener_auditoria_horario_local(args[0] if args else {})
+        elif method_name == "obtenerPersonalConfig":
+            import horario_logic as hl
+            res = hl.obtener_personal_config_local(args[0] if args else {})
+        elif method_name == "guardarPersonalConfig":
+            import horario_logic as hl
+            res = hl.guardar_personal_config_local(args[0] if args else {})
+        elif method_name == "guardarLiquidacionHorario":
+            import horario_logic as hl
+            res = hl.guardar_liquidacion_horario_local(args[0] if args else {})
         elif method_name == "guardarCheckInGrupalEmpresa":
             res = dl.guardar_checkin_grupal_empresa_local(args[0] if args else {})
         elif method_name == "obtenerEstanciasPagoMasivo":
             res = dl.obtener_estancias_pago_masivo_local(args[0] if args else {})
         elif method_name == "guardarPagoMasivo":
             res = dl.guardar_pago_masivo_local(args[0] if args else {})
+        elif method_name == "obtenerCuentaDetalladaHab":
+            import pases_logic as pl
+            res = pl.obtener_cuenta_detallada_hab_local(args[0] if args else {})
         else:
             raise HTTPException(status_code=404, detail=f"Método RPC no soportado: {method_name}")
 
