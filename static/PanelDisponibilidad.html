@@ -2467,7 +2467,7 @@
 
         // Si la recepcionista le puso un color manual, manda ese color de fondo
         const tieneColor = Boolean(colorManual && colorManual !== "#ffffff");
-        const tieneEmpresaOcupada = h.estado !== "libre" && Boolean(h.empresa && String(h.empresa).trim().length > 0 && String(h.empresa).trim() !== "—" && String(h.empresa).trim() !== "-");
+        const _empUp = String(h.empresa || "").trim().toUpperCase(); const tieneEmpresaOcupada = h.estado !== "libre" && Boolean(_empUp.length > 0 && _empUp !== "—" && _empUp !== "-" && !_empUp.startsWith("TRANSITO") && !_empUp.startsWith("TRÁNSITO") && !_empUp.startsWith("PARTICULAR"));
 
         if (tieneColor) {
           tr.style.backgroundColor = colorManual;

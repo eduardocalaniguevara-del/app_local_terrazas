@@ -596,6 +596,17 @@ def obtener_estado_red_cola(conn=None) -> Dict[str, Any]:
 _ULTIMA_FECHA_PANEL_ISO: Optional[str] = None
 
 
+def es_empresa_corporativa(emp: Any) -> bool:
+    """True solo si es una empresa corporativa real (ignora TRANSITO / PARTICULAR de uso diario)."""
+    s = str(emp or "").strip().upper()
+    if not s or s in ("-", "—", "NINGUNA", "NO"):
+        return False
+    for pref in ("TRANSITO", "TRÁNSITO", "PARTICULAR"):
+        if s.startswith(pref):
+            return False
+    return True
+
+
 def obtener_datos_panel_local(fecha_override: Optional[str] = None) -> Dict[str, Any]:
     global _ULTIMA_FECHA_PANEL_ISO
     conn = get_connection()
@@ -959,7 +970,19 @@ def obtener_datos_panel_local(fecha_override: Optional[str] = None) -> Dict[str,
                     "historialDia": hist_filtrado,
                 })
             else:
-                saldo = float(st["saldo"] or 0)
+                saldo_real_est = float(st["saldo"] or 0)
+                snacks_carg = float(st["snacks"] or 0)
+                serv_carg = float(st["servicios"] or 0)
+                adic_comp_est = float(st["adicComp"] or 0)
+                pagado_est = float(st["pagado"] or 0)
+                emp_est = str(st.get("empresa") or "").strip()
+                if es_empresa_corporativa(emp_est) and saldo_real_est > 0:
+                    tot_adic_est = snacks_carg + serv_carg + adic_comp_est
+                    adic_pend = max(0.0, round(tot_adic_est - pagado_est, 2))
+                    saldo = min(saldo_real_est, adic_pend)
+                else:
+                    saldo = saldo_real_est
+
                 deuda_ant = float(st["deudaAnt"] or 0)
                 continuo = bool(st["continuoEstancia"])
                 es_vuelto = (saldo < 0) and (continuo or deuda_ant < 0)
@@ -970,8 +993,6 @@ def obtener_datos_panel_local(fecha_override: Optional[str] = None) -> Dict[str,
                 else:
                     estado_clave = "ocupado_aldia"
 
-                snacks_carg = float(st["snacks"] or 0)
-                serv_carg = float(st["servicios"] or 0)
                 t_pag = float(st["tiendaPagada"] or 0)
                 t_its = st["tiendaItems"] or []
                 total_adic = round(snacks_carg + serv_carg + t_pag, 2)
@@ -4815,7 +4836,7 @@ def obtener_estancias_pago_masivo_local(filtros: Optional[Dict[str, Any]] = None
     for st in panel["estanciasCache"]:
         empresa = str(st.get("empresa") or "").strip()
         saldo = round(float(st.get("saldo") or 0), 2)
-        if not empresa or saldo <= 0:
+        if not es_empresa_corporativa(empresa) or saldo <= 0:
             continue
         if st.get("esCancelada") or st.get("esInactiva") or st.get("esContinuacionCerrada"):
             continue
