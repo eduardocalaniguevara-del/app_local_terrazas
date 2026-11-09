@@ -195,7 +195,7 @@ def init_db() -> None:
 
                 CREATE INDEX IF NOT EXISTS idx_tienda_hab_fecha ON ventas_tienda (hab, fecha_dmy);
 
-                -- 6b. Vitrina_Tienda (Inventario y últimos 3 conteos H:I, J:K, L:M)
+                -- 6b. Vitrina_Tienda (Inventario y últimos 8 conteos H:W)
                 CREATE TABLE IF NOT EXISTS vitrina_local (
                     producto      TEXT PRIMARY KEY,
                     orden         INTEGER NOT NULL DEFAULT 0,
@@ -207,6 +207,16 @@ def init_db() -> None:
                     h2_est        TEXT NOT NULL DEFAULT '',
                     h3_cant       TEXT NOT NULL DEFAULT '',
                     h3_est        TEXT NOT NULL DEFAULT '',
+                    h4_cant       TEXT NOT NULL DEFAULT '',
+                    h4_est        TEXT NOT NULL DEFAULT '',
+                    h5_cant       TEXT NOT NULL DEFAULT '',
+                    h5_est        TEXT NOT NULL DEFAULT '',
+                    h6_cant       TEXT NOT NULL DEFAULT '',
+                    h6_est        TEXT NOT NULL DEFAULT '',
+                    h7_cant       TEXT NOT NULL DEFAULT '',
+                    h7_est        TEXT NOT NULL DEFAULT '',
+                    h8_cant       TEXT NOT NULL DEFAULT '',
+                    h8_est        TEXT NOT NULL DEFAULT '',
                     updated_at    TEXT NOT NULL DEFAULT ''
                 );
 
@@ -464,6 +474,13 @@ def init_db() -> None:
             if "personal" not in cols_gas:
                 conn.execute("ALTER TABLE gastos ADD COLUMN personal TEXT NOT NULL DEFAULT ''")
             # Migración: pago por Acumulado Efectivo (A. Efec) en liquidaciones
+            # Migración: ampliar historial de Vitrina_Tienda a 8 conteos hacia atrás (h4..h8)
+            cols_vit = [r[1] for r in conn.execute("PRAGMA table_info(vitrina_local)").fetchall()]
+            for idx_h in range(4, 9):
+                for suf in ("cant", "est"):
+                    col_vh = f"h{idx_h}_{suf}"
+                    if col_vh not in cols_vit:
+                        conn.execute(f"ALTER TABLE vitrina_local ADD COLUMN {col_vh} TEXT NOT NULL DEFAULT ''")
             cols_liq = [r[1] for r in conn.execute("PRAGMA table_info(horario_liquidaciones)").fetchall()]
             if "a_efec" not in cols_liq:
                 conn.execute("ALTER TABLE horario_liquidaciones ADD COLUMN a_efec REAL NOT NULL DEFAULT 0")

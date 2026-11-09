@@ -3811,6 +3811,16 @@ def obtener_datos_vitrina_local() -> Dict[str, Any]:
 
         stock_alm_map, delta_vit_pend_map = _calcular_stocks_almacen_y_deltas_conn(conn)
 
+        # Asegurar columnas h4..h8 en caliente
+        cols_vit_chk = [r[1] for r in conn.execute("PRAGMA table_info(vitrina_local)").fetchall()]
+        if "h8_est" not in cols_vit_chk:
+            for idx_h in range(4, 9):
+                for suf in ("cant", "est"):
+                    col_vh = f"h{idx_h}_{suf}"
+                    if col_vh not in cols_vit_chk:
+                        conn.execute(f"ALTER TABLE vitrina_local ADD COLUMN {col_vh} TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+
         # 2. Leer productos de vitrina_local (o fallback a catalogos_local si aún no hubo pull)
         filas_vit = conn.execute("SELECT * FROM vitrina_local ORDER BY orden ASC").fetchall()
         productos_out: List[Dict[str, Any]] = []
@@ -3825,20 +3835,19 @@ def obtener_datos_vitrina_local() -> Dict[str, Any]:
                 delta_alm_vit = delta_vit_pend_map.get(prod_nom, 0.0)
                 st_actual = st_sheets - vend_local + delta_alm_vit
                 st_alm = stock_alm_map.get(prod_nom, 0.0)
-                productos_out.append({
+                r_keys = r.keys()
+                item_d = {
                     "orden": int(r["orden"] or 0),
                     "producto": prod_nom,
                     "precioVenta": precios_map.get(prod_nom, 0.0),
                     "stockAlmacen": _fmt_num_stock(st_alm),
                     "stockVitrina": _fmt_num_stock(st_actual),
                     "estadoActual": str(r["estado_actual"] or ""),
-                    "h1Cant": str(r["h1_cant"] or ""),
-                    "h1Est": str(r["h1_est"] or ""),
-                    "h2Cant": str(r["h2_cant"] or ""),
-                    "h2Est": str(r["h2_est"] or ""),
-                    "h3Cant": str(r["h3_cant"] or ""),
-                    "h3Est": str(r["h3_est"] or ""),
-                })
+                }
+                for idx_h in range(1, 9):
+                    item_d[f"h{idx_h}Cant"] = str(r[f"h{idx_h}_cant"] or "") if f"h{idx_h}_cant" in r_keys else ""
+                    item_d[f"h{idx_h}Est"] = str(r[f"h{idx_h}_est"] or "") if f"h{idx_h}_est" in r_keys else ""
+                productos_out.append(item_d)
         else:
             for idx_p, rc in enumerate(
                 conn.execute("SELECT clave, valor FROM catalogos_local WHERE categoria = 'PRODUCTO_TIENDA' ORDER BY orden").fetchall()
@@ -3848,24 +3857,22 @@ def obtener_datos_vitrina_local() -> Dict[str, Any]:
                     continue
                 st_alm = stock_alm_map.get(prod_nom, 0.0)
                 delta_alm_vit = delta_vit_pend_map.get(prod_nom, 0.0)
-                productos_out.append({
+                item_d = {
                     "orden": idx_p + 1,
                     "producto": prod_nom,
                     "precioVenta": round(parse_moneda(rc["valor"]), 2),
                     "stockAlmacen": _fmt_num_stock(st_alm),
                     "stockVitrina": _fmt_num_stock(delta_alm_vit),
                     "estadoActual": "",
-                    "h1Cant": "",
-                    "h1Est": "",
-                    "h2Cant": "",
-                    "h2Est": "",
-                    "h3Cant": "",
-                    "h3Est": "",
-                })
+                }
+                for idx_h in range(1, 9):
+                    item_d[f"h{idx_h}Cant"] = ""
+                    item_d[f"h{idx_h}Est"] = ""
+                productos_out.append(item_d)
 
-        # 3. Metadatos E2, E3 y encabezados H4, J4, L4
+        # 3. Metadatos E2, E3 y encabezados H4..V4 (8 conteos)
         meta_rows = conn.execute(
-            "SELECT clave, valor FROM estado_sistema WHERE clave IN ('vitrina_responsable_e2', 'vitrina_fecha_e3', 'vitrina_h1_header', 'vitrina_h2_header', 'vitrina_h3_header')"
+            "SELECT clave, valor FROM estado_sistema WHERE clave LIKE 'vitrina_%'"
         ).fetchall()
         meta = {r["clave"]: str(r["valor"] or "") for r in meta_rows}
 
@@ -3935,8 +3942,13 @@ def obtener_datos_vitrina_local() -> Dict[str, Any]:
             "responsableE2": resp_e2,
             "fechaUltimoE3": meta.get("vitrina_fecha_e3", ""),
             "h1Header": _limpiar_header_vitrina(meta.get("vitrina_h1_header", ""), "Conteo 1 (Último)"),
-            "h2Header": _limpiar_header_vitrina(meta.get("vitrina_h2_header", ""), "Conteo 2 (Anterior)"),
-            "h3Header": _limpiar_header_vitrina(meta.get("vitrina_h3_header", ""), "Conteo 3 (Previo)"),
+            "h2Header": _limpiar_header_vitrina(meta.get("vitrina_h2_header", ""), "Conteo 2"),
+            "h3Header": _limpiar_header_vitrina(meta.get("vitrina_h3_header", ""), "Conteo 3"),
+            "h4Header": _limpiar_header_vitrina(meta.get("vitrina_h4_header", ""), "Conteo 4"),
+            "h5Header": _limpiar_header_vitrina(meta.get("vitrina_h5_header", ""), "Conteo 5"),
+            "h6Header": _limpiar_header_vitrina(meta.get("vitrina_h6_header", ""), "Conteo 6"),
+            "h7Header": _limpiar_header_vitrina(meta.get("vitrina_h7_header", ""), "Conteo 7"),
+            "h8Header": _limpiar_header_vitrina(meta.get("vitrina_h8_header", ""), "Conteo 8"),
             "listaPersonal": personal,
             "productos": productos_out,
             "gestionTienda": {
@@ -4014,11 +4026,11 @@ def guardar_conteo_vitrina_local(datos: Dict[str, Any]) -> Dict[str, Any]:
     nuevo_h1_hdr = f"Conteo:\n{responsable}\n{fecha_hora_dmy}"
 
     with db_transaction() as conn:
-        # Desplazar encabezados H1 -> H2 -> H3
-        row_h1 = conn.execute("SELECT valor FROM estado_sistema WHERE clave = 'vitrina_h1_header'").fetchone()
-        row_h2 = conn.execute("SELECT valor FROM estado_sistema WHERE clave = 'vitrina_h2_header'").fetchone()
-        old_h1 = str(row_h1["valor"] or "") if row_h1 else ""
-        old_h2 = str(row_h2["valor"] or "") if row_h2 else ""
+        # Desplazar encabezados H1 -> H2 -> ... -> H8
+        old_hdrs = {}
+        for idx_h in range(1, 8):
+            r_h = conn.execute("SELECT valor FROM estado_sistema WHERE clave = ?", (f"vitrina_h{idx_h}_header",)).fetchone()
+            old_hdrs[idx_h] = str(r_h["valor"] or "") if r_h else ""
 
         def _set_est(k: str, v: str) -> None:
             conn.execute(
@@ -4032,11 +4044,11 @@ def guardar_conteo_vitrina_local(datos: Dict[str, Any]) -> Dict[str, Any]:
 
         _set_est("vitrina_responsable_e2", responsable)
         _set_est("vitrina_fecha_e3", fecha_hora_dmy)
-        _set_est("vitrina_h3_header", old_h2)
-        _set_est("vitrina_h2_header", old_h1)
+        for idx_h in range(8, 1, -1):
+            _set_est(f"vitrina_h{idx_h}_header", old_hdrs.get(idx_h - 1, ""))
         _set_est("vitrina_h1_header", nuevo_h1_hdr)
 
-        # Desplazar columnas en vitrina_local (h2 -> h3, h1 -> h2, nuevo -> h1)
+        # Desplazar columnas en vitrina_local (h7 -> h8, ..., h1 -> h2, nuevo -> h1)
         for p in prods_list:
             nom_p = p["producto"]
             it = items_map.get(nom_p) or {"cant": "", "estado": ""}
@@ -4044,9 +4056,21 @@ def guardar_conteo_vitrina_local(datos: Dict[str, Any]) -> Dict[str, Any]:
                 """
                 INSERT INTO vitrina_local (
                     producto, orden, stock_sheets, estado_actual,
-                    h1_cant, h1_est, h2_cant, h2_est, h3_cant, h3_est, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    h1_cant, h1_est, h2_cant, h2_est, h3_cant, h3_est,
+                    h4_cant, h4_est, h5_cant, h5_est, h6_cant, h6_est,
+                    h7_cant, h7_est, h8_cant, h8_est, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(producto) DO UPDATE SET
+                    h8_cant = vitrina_local.h7_cant,
+                    h8_est  = vitrina_local.h7_est,
+                    h7_cant = vitrina_local.h6_cant,
+                    h7_est  = vitrina_local.h6_est,
+                    h6_cant = vitrina_local.h5_cant,
+                    h6_est  = vitrina_local.h5_est,
+                    h5_cant = vitrina_local.h4_cant,
+                    h5_est  = vitrina_local.h4_est,
+                    h4_cant = vitrina_local.h3_cant,
+                    h4_est  = vitrina_local.h3_est,
                     h3_cant = vitrina_local.h2_cant,
                     h3_est  = vitrina_local.h2_est,
                     h2_cant = vitrina_local.h1_cant,
@@ -4067,6 +4091,16 @@ def guardar_conteo_vitrina_local(datos: Dict[str, Any]) -> Dict[str, Any]:
                     p.get("h1Est") or "",
                     p.get("h2Cant") or "",
                     p.get("h2Est") or "",
+                    p.get("h3Cant") or "",
+                    p.get("h3Est") or "",
+                    p.get("h4Cant") or "",
+                    p.get("h4Est") or "",
+                    p.get("h5Cant") or "",
+                    p.get("h5Est") or "",
+                    p.get("h6Cant") or "",
+                    p.get("h6Est") or "",
+                    p.get("h7Cant") or "",
+                    p.get("h7Est") or "",
                     ahora_iso,
                 ),
             )

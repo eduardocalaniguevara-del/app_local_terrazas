@@ -753,9 +753,14 @@
               <th class="px-1.5 w-[108px] text-center border-r border-[#433A36] bg-purple-950/60">Conteo Físico</th>
               <th class="px-1.5 w-[60px] text-center border-r border-[#433A36]">Dif.</th>
               <th class="px-1.5 w-[98px] text-center border-r border-[#433A36]">Estado</th>
-              <th id="thVitrinaH1" class="px-1.5 w-[135px] text-center border-r border-[#433A36] bg-black/50 text-[10px] leading-tight">Conteo 1 (Último)</th>
-              <th id="thVitrinaH2" class="col-hist-extra px-1.5 w-[145px] text-center border-r border-[#433A36] bg-black/35 text-[10px] leading-tight">Conteo 2 (Anterior)</th>
-              <th id="thVitrinaH3" class="col-hist-extra px-1.5 w-[145px] text-center bg-black/20 text-[10px] leading-tight">Conteo 3 (Previo)</th>
+              <th id="thVitrinaH1" class="px-1.5 min-w-[125px] text-center border-r border-[#433A36] bg-black/50 text-[10px] leading-tight">Conteo 1 (Último)</th>
+              <th id="thVitrinaH2" class="col-hist-extra px-1.5 min-w-[125px] text-center border-r border-[#433A36] bg-black/40 text-[10px] leading-tight">Conteo 2</th>
+              <th id="thVitrinaH3" class="col-hist-extra px-1.5 min-w-[125px] text-center border-r border-[#433A36] bg-black/30 text-[10px] leading-tight">Conteo 3</th>
+              <th id="thVitrinaH4" class="col-hist-extra px-1.5 min-w-[125px] text-center border-r border-[#433A36] bg-black/25 text-[10px] leading-tight">Conteo 4</th>
+              <th id="thVitrinaH5" class="col-hist-extra px-1.5 min-w-[125px] text-center border-r border-[#433A36] bg-black/20 text-[10px] leading-tight">Conteo 5</th>
+              <th id="thVitrinaH6" class="col-hist-extra px-1.5 min-w-[125px] text-center border-r border-[#433A36] bg-black/15 text-[10px] leading-tight">Conteo 6</th>
+              <th id="thVitrinaH7" class="col-hist-extra px-1.5 min-w-[125px] text-center border-r border-[#433A36] bg-black/10 text-[10px] leading-tight">Conteo 7</th>
+              <th id="thVitrinaH8" class="col-hist-extra px-1.5 min-w-[125px] text-center bg-black/10 text-[10px] leading-tight">Conteo 8</th>
             </tr>
           </thead>
           <tbody id="vitrinaBody" class="divide-y divide-[#E6DCD2]"></tbody>
@@ -5301,12 +5306,13 @@
     if (lblUlt) {
       lblUlt.textContent = (res.fechaUltimoE3 ? res.fechaUltimoE3 : '—') + (res.responsableE2 ? ' (' + res.responsableE2 + ')' : '');
     }
-    var th1 = document.getElementById('thVitrinaH1');
-    var th2 = document.getElementById('thVitrinaH2');
-    var th3 = document.getElementById('thVitrinaH3');
-    if (th1) th1.textContent = res.h1Header || 'Conteo 1 (Último)';
-    if (th2) th2.textContent = res.h2Header || 'Conteo 2 (Anterior)';
-    if (th3) th3.textContent = res.h3Header || 'Conteo 3 (Previo)';
+    for (var iH = 1; iH <= 8; iH++) {
+      var thEl = document.getElementById('thVitrinaH' + iH);
+      if (thEl) {
+        var defLbl = iH === 1 ? 'Conteo 1 (Último)' : ('Conteo ' + iH);
+        thEl.textContent = res['h' + iH + 'Header'] || defLbl;
+      }
+    }
 
     renderTablaFilasVitrina();
     actualizarResumenPillsVitrina();
@@ -5327,7 +5333,7 @@
     if (!body) return;
     var lista = obtenerProductosFiltradosVitrina();
     if (!lista.length) {
-      body.innerHTML = '<tr><td colspan="10" class="px-4 py-6 text-center text-slate-400 font-bold">No se encontraron productos en Vitrina_Tienda.</td></tr>';
+      body.innerHTML = '<tr><td colspan="15" class="px-4 py-6 text-center text-slate-400 font-bold">No se encontraron productos en Vitrina_Tienda.</td></tr>';
       return;
     }
     body.innerHTML = lista.map(function (p, idx) {
@@ -5367,7 +5373,12 @@
         '<td class="celda-est-vitrina px-1.5 text-center border-r border-[#E6DCD2]">' + estHtml + '</td>' +
         '<td class="px-1.5 text-center border-r border-[#E6DCD2] bg-white/60">' + celdaHistorialVitrinaHTML(p.h1Cant, p.h1Est) + '</td>' +
         '<td class="col-hist-extra px-1.5 text-center border-r border-[#E6DCD2] bg-slate-50/50">' + celdaHistorialVitrinaHTML(p.h2Cant, p.h2Est) + '</td>' +
-        '<td class="col-hist-extra px-1.5 text-center bg-slate-100/40">' + celdaHistorialVitrinaHTML(p.h3Cant, p.h3Est) + '</td>' +
+        '<td class="col-hist-extra px-1.5 text-center border-r border-[#E6DCD2] bg-slate-100/40">' + celdaHistorialVitrinaHTML(p.h3Cant, p.h3Est) + '</td>' +
+        '<td class="col-hist-extra px-1.5 text-center border-r border-[#E6DCD2] bg-white/60">' + celdaHistorialVitrinaHTML(p.h4Cant, p.h4Est) + '</td>' +
+        '<td class="col-hist-extra px-1.5 text-center border-r border-[#E6DCD2] bg-slate-50/50">' + celdaHistorialVitrinaHTML(p.h5Cant, p.h5Est) + '</td>' +
+        '<td class="col-hist-extra px-1.5 text-center border-r border-[#E6DCD2] bg-slate-100/40">' + celdaHistorialVitrinaHTML(p.h6Cant, p.h6Est) + '</td>' +
+        '<td class="col-hist-extra px-1.5 text-center border-r border-[#E6DCD2] bg-white/60">' + celdaHistorialVitrinaHTML(p.h7Cant, p.h7Est) + '</td>' +
+        '<td class="col-hist-extra px-1.5 text-center bg-slate-50/50">' + celdaHistorialVitrinaHTML(p.h8Cant, p.h8Est) + '</td>' +
       '</tr>';
     }).join('');
   }
