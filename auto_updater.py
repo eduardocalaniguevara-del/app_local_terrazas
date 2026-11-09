@@ -227,6 +227,12 @@ def recargar_en_memoria_sin_cortes() -> None:
             importlib.reload(sys.modules["domain_logic"])
         if "horario_logic" in sys.modules:
             importlib.reload(sys.modules["horario_logic"])
+        if "database" in sys.modules:
+            importlib.reload(sys.modules["database"])
+        if "sync_engine" in sys.modules:
+            importlib.reload(sys.modules["sync_engine"])
+        if "pases_logic" in sys.modules:
+            importlib.reload(sys.modules["pases_logic"])
         if "tablet_manager" in sys.modules:
             importlib.reload(sys.modules["tablet_manager"])
         dl_path = BASE_APP_DIR / "domain_logic.py"

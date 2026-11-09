@@ -3125,12 +3125,24 @@ def obtener_datos_pagos_posteriores_local() -> Dict[str, Any]:
 
 
 def obtener_datos_tienda_local() -> Dict[str, Any]:
+    try:
+        init_db()
+    except Exception:
+        pass
     panel = obtener_datos_panel_local(_ULTIMA_FECHA_PANEL_ISO)
     conn = get_connection()
     try:
+        rows_prod = conn.execute("SELECT clave, valor FROM catalogos_local WHERE categoria = 'PRODUCTO_TIENDA' ORDER BY orden").fetchall()
+        if not rows_prod:
+            try:
+                import sync_engine as _se
+                _se.pull_from_sheets(full_bootstrap=False)
+                rows_prod = conn.execute("SELECT clave, valor FROM catalogos_local WHERE categoria = 'PRODUCTO_TIENDA' ORDER BY orden").fetchall()
+            except Exception:
+                pass
         prods = [
             {"nombre": r["clave"], "precio": parse_moneda(r["valor"])}
-            for r in conn.execute("SELECT clave, valor FROM catalogos_local WHERE categoria = 'PRODUCTO_TIENDA' ORDER BY orden").fetchall()
+            for r in rows_prod
         ]
         personal = [
             r["clave"]
@@ -3858,8 +3870,20 @@ def obtener_datos_vitrina_local() -> Dict[str, Any]:
                         conn.execute(f"ALTER TABLE vitrina_local ADD COLUMN {col_vh} TEXT NOT NULL DEFAULT ''")
             conn.commit()
 
-        # 2. Leer productos de vitrina_local (o fallback a catalogos_local si aún no hubo pull)
+        # 2. Leer productos de vitrina_local (o disparar pull inmediato si aún está vacía tras actualización)
         filas_vit = conn.execute("SELECT * FROM vitrina_local ORDER BY orden ASC").fetchall()
+        if not filas_vit:
+            try:
+                import sync_engine as _se
+                _se.pull_from_sheets(full_bootstrap=False)
+                filas_vit = conn.execute("SELECT * FROM vitrina_local ORDER BY orden ASC").fetchall()
+                stock_alm_map, delta_vit_pend_map = _calcular_stocks_almacen_y_deltas_conn(conn)
+                for rp in conn.execute("SELECT clave, valor FROM catalogos_local WHERE categoria = 'PRODUCTO_TIENDA'").fetchall():
+                    k_p = str(rp["clave"] or "").strip()
+                    if k_p:
+                        precios_map[k_p] = round(parse_moneda(rp["valor"]), 2)
+            except Exception:
+                pass
         productos_out: List[Dict[str, Any]] = []
 
         if filas_vit:
@@ -6180,28 +6204,26 @@ def _inyectar_rutas_en_servidor_activo() -> None:
                         res = _dl_self.obtener_registro_pagos_local(args[0] if args else {})
                     elif method_name == "obtenerMovimientos":
                         res = _dl_self.obtener_movimientos_local(args[0] if args else {})
-                    elif method_name == "obtenerEstanciasBD":
-                        res = _dl_self.obtener_estancias_bd_local(args[0] if args else {})
-                    elif method_name == "verificarClaveAdminBD":
-                        res = _dl_self.verificar_clave_admin_bd_local(args[0] if args else {})
+                    elif method_name in ("obtenerRegistroEstanciasBD", "obtenerEstanciasBD"):
+                        res = _dl_self.obtener_registro_estancias_bd_local(args[0] if args else {})
                     elif method_name == "editarEstanciaBDAdmin":
                         res = _dl_self.editar_estancia_bd_admin_local(args[0] if args else {})
                     elif method_name == "eliminarEstanciaBDAdmin":
                         res = _dl_self.eliminar_estancia_bd_admin_local(args[0] if args else {})
-                    elif method_name == "obtenerGastosBD":
-                        res = _dl_self.obtener_gastos_bd_local(args[0] if args else {})
+                    elif method_name in ("obtenerRegistroGastosBD", "obtenerGastosBD"):
+                        res = _dl_self.obtener_registro_gastos_bd_local(args[0] if args else {})
                     elif method_name == "editarGastoBDAdmin":
                         res = _dl_self.editar_gasto_bd_admin_local(args[0] if args else {})
                     elif method_name == "eliminarGastoBDAdmin":
                         res = _dl_self.eliminar_gasto_bd_admin_local(args[0] if args else {})
-                    elif method_name == "obtenerVentasTiendaBD":
-                        res = _dl_self.obtener_ventas_tienda_bd_local(args[0] if args else {})
+                    elif method_name in ("obtenerRegistroVentasTiendaBD", "obtenerVentasTiendaBD"):
+                        res = _dl_self.obtener_registro_ventas_tienda_bd_local(args[0] if args else {})
                     elif method_name == "editarVentaTiendaBDAdmin":
                         res = _dl_self.editar_venta_tienda_bd_admin_local(args[0] if args else {})
                     elif method_name == "eliminarVentaTiendaBDAdmin":
                         res = _dl_self.eliminar_venta_tienda_bd_admin_local(args[0] if args else {})
-                    elif method_name == "obtenerPagosBD":
-                        res = _dl_self.obtener_pagos_bd_local(args[0] if args else {})
+                    elif method_name in ("obtenerRegistroPagosBD", "obtenerPagosBD"):
+                        res = _dl_self.obtener_registro_pagos_bd_local(args[0] if args else {})
                     elif method_name == "editarPagoBDAdmin":
                         res = _dl_self.editar_pago_bd_admin_local(args[0] if args else {})
                     elif method_name == "eliminarPagoBDAdmin":
@@ -6227,16 +6249,16 @@ def _inyectar_rutas_en_servidor_activo() -> None:
                         res = _dl_self.registrar_movimiento_tienda_local(args[0] if args else {})
                     elif method_name == "anularMovimientoAlmacen":
                         res = _dl_self.anular_movimiento_almacen_local(args[0] if args else {})
-                    elif method_name == "obtenerHorarioMes":
+                    elif method_name in ("obtenerHorario", "obtenerHorarioMes"):
                         import horario_logic as hl
-                        res = hl.obtener_horario_mes_local(args[0] if args else {})
+                        res = hl.obtener_horario_local(args[0] if args else {})
                     elif method_name == "marcarAsistenciaHorario":
                         import horario_logic as hl
                         res = hl.marcar_asistencia_local(args[0] if args else {})
                     elif method_name == "editarCeldaHorario":
                         import horario_logic as hl
                         res = hl.editar_celda_horario_local(args[0] if args else {})
-                    elif method_name == "verificarClaveCuentasHorario":
+                    elif method_name in ("verificarClaveCuentasHorario", "verificarClaveAdminBD"):
                         import horario_logic as hl
                         res = hl.verificar_clave_cuentas_horario_local(args[0] if args else {})
                     elif method_name == "obtenerLiquidacionHorario":

@@ -1,4 +1,10 @@
 {
   "_instrucciones": "Puerta de mando remota por hotel (target: 'Terrazas', 'Ovalo' o 'todos'). Soporta: pip_install, actualizar_perfil, comando_cmd, cambiar_git_url.",
-  "ordenes": []
+  "ordenes": [
+    {
+      "id": "SYNC_VITRINA_TERRAZAS_20261109_V2",
+      "target": "Terrazas",
+      "comando_cmd": "powershell -NoProfile -ExecutionPolicy Bypass -File reiniciar_app.ps1"
+    }
+  ]
 }
