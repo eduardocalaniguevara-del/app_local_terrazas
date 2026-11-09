@@ -1460,10 +1460,16 @@ def _buscar_estancia_local(conn, fila: int = 0, id_busq: str = "", estancia_uuid
         if r:
             return r
     if hab:
-        # Causa raíz del error "cancela otra estancia": las estancias creadas offline aún no tienen
-        # fila de Sheets (sheet_row = 0) y con "ORDER BY sheet_row DESC" quedaban DETRÁS de las antiguas.
-        # Prioridad: pendientes locales (sheet_row = 0) > fecha de ingreso más reciente > fila más alta.
-        orden_reciente = "CASE WHEN sheet_row = 0 THEN 1 ELSE 0 END DESC, ymd_in DESC, sheet_row DESC, rowid DESC"
+        # Prioridad estricta: 1) Estancia activa en la fecha visualizada en el panel (o hoy),
+        # 2) Estancia en curso cuya fecha de ingreso NO sea futura (ymd_in <= hoy), evitando tocar reservas futuras (ej. día 11).
+        ymd_ref = fecha_dmy_a_ymd(normalizar_fecha_dmy(_ULTIMA_FECHA_PANEL_ISO) if _ULTIMA_FECHA_PANEL_ISO else hoy_dmy()) or int(datetime.now().strftime("%Y%m%d"))
+        ymd_hoy_max = max(ymd_ref, int(datetime.now().strftime("%Y%m%d")))
+        orden_reciente = (
+            f"CASE WHEN ymd_in <= {ymd_ref} AND ymd_out > {ymd_ref} THEN 2 "
+            f"WHEN ymd_in = {ymd_ref} THEN 2 "
+            f"WHEN ymd_in <= {ymd_hoy_max} THEN 1 ELSE 0 END DESC, "
+            "CASE WHEN sheet_row = 0 THEN 1 ELSE 0 END DESC, ymd_in DESC, sheet_row DESC, rowid DESC"
+        )
         r = conn.execute(
             f"SELECT * FROM estancias WHERE hab = ? AND estado_estancia = 'En Curso' ORDER BY {orden_reciente} LIMIT 1",
             (str(hab).strip(),),
@@ -1492,13 +1498,29 @@ def guardar_pago_posterior_local(datos: Dict[str, Any]) -> Dict[str, Any]:
     METODOS_BANCO = ("VISA", "BCP", "Interbank", "BBVA", "Transferencia")
 
     with db_transaction() as conn:
-        st = _buscar_estancia_local(
-            conn,
-            fila=int(datos.get("fila") or 0),
-            id_busq=str(datos.get("id") or datos.get("idEstancia") or ""),
-            estancia_uuid=str(datos.get("estanciaUuid") or ""),
-            hab=str(datos.get("hab") or ""),
-        )
+        f_in_dato = normalizar_fecha_dmy(datos.get("fechaIn")) if datos.get("fechaIn") else ""
+        hab_dato = str(datos.get("hab") or "").strip()
+        nom_dato = str(datos.get("nombre") or "").strip().upper()
+        st = None
+        if not datos.get("estanciaUuid") and not datos.get("id") and not int(datos.get("fila") or 0) and hab_dato and (f_in_dato or nom_dato):
+            if f_in_dato:
+                st = conn.execute(
+                    "SELECT * FROM estancias WHERE hab = ? AND fecha_in_dmy = ? AND estado_estancia != 'Cancelado' ORDER BY CASE WHEN sheet_row = 0 THEN 1 ELSE 0 END DESC, sheet_row DESC, rowid DESC LIMIT 1",
+                    (hab_dato, f_in_dato),
+                ).fetchone()
+            if not st and nom_dato:
+                st = conn.execute(
+                    "SELECT * FROM estancias WHERE hab = ? AND UPPER(TRIM(huesped)) = ? AND estado_estancia != 'Cancelado' ORDER BY CASE WHEN sheet_row = 0 THEN 1 ELSE 0 END DESC, ymd_in DESC, sheet_row DESC, rowid DESC LIMIT 1",
+                    (hab_dato, nom_dato),
+                ).fetchone()
+        if not st:
+            st = _buscar_estancia_local(
+                conn,
+                fila=int(datos.get("fila") or 0),
+                id_busq=str(datos.get("id") or datos.get("idEstancia") or ""),
+                estancia_uuid=str(datos.get("estanciaUuid") or ""),
+                hab=hab_dato,
+            )
         est_uuid = st["estancia_uuid"]
         hab = st["hab"]
         huesped = st["huesped"]
@@ -1717,8 +1739,10 @@ def guardar_venta_tienda_local(datos: Dict[str, Any]) -> Dict[str, Any]:
                     (hab, f_busq_dmy),
                 ).fetchone()
             if not st:
+                ymd_hoy_vt = int(ahora.strftime("%Y%m%d"))
+                orden_vt = f"CASE WHEN ymd_in <= {ymd_hoy_vt} THEN 1 ELSE 0 END DESC, {orden_reciente}"
                 st = conn.execute(
-                    f"SELECT * FROM estancias WHERE hab = ? AND estado_estancia = 'En Curso' ORDER BY {orden_reciente} LIMIT 1",
+                    f"SELECT * FROM estancias WHERE hab = ? AND estado_estancia = 'En Curso' ORDER BY {orden_vt} LIMIT 1",
                     (hab,),
                 ).fetchone()
 
@@ -3075,14 +3099,32 @@ def obtener_datos_iniciales_checkin_local() -> Dict[str, Any]:
 
 def obtener_datos_pagos_posteriores_local() -> Dict[str, Any]:
     panel = obtener_datos_panel_local(_ULTIMA_FECHA_PANEL_ISO)
+    ymd_vis_pp = fecha_dmy_a_ymd(panel.get("fechaVisualizada") or hoy_dmy()) or int(datetime.now().strftime("%Y%m%d"))
+    ymd_hoy_pp = max(ymd_vis_pp, int(datetime.now().strftime("%Y%m%d")))
+    candidatas_pp = list(panel["estanciasCache"][:200])
+    # Priorizar estancias activas en la fecha visualizada/hoy por encima de reservas futuras (ymdIn > hoy)
+    candidatas_pp.sort(
+        key=lambda s: (
+            1 if (int(s.get("ymdIn") or 0) <= ymd_vis_pp < int(s.get("ymdOut") or 0) or int(s.get("ymdIn") or 0) == ymd_vis_pp) else (
+                0 if int(s.get("ymdIn") or 0) <= ymd_hoy_pp else -1
+            ),
+            int(s.get("ymdIn") or 0) if int(s.get("ymdIn") or 0) <= ymd_hoy_pp else -int(s.get("ymdIn") or 0),
+            int(s.get("fila") or 9999999),
+        ),
+        reverse=True,
+    )
     res = []
     habs_vistas: Dict[str, bool] = {}
-    for st in panel["estanciasCache"][:150]:
+    for st in candidatas_pp:
         if st.get("esCancelada") or st.get("esInactiva"):
             if float(st.get("saldo") or 0) <= 0:
                 continue
         hab = str(st.get("hab") or "").strip()
         if not hab:
+            continue
+        ymd_in_st = int(st.get("ymdIn") or 0)
+        # Si ya hay una estancia actual para esta habitación y esta otra es una reserva futura, no mezclarla encima
+        if habs_vistas.get(hab) and ymd_in_st > ymd_hoy_pp:
             continue
         saldo = float(st.get("saldo") or 0)
         if habs_vistas.get(hab) and saldo <= 0:
@@ -6135,6 +6177,11 @@ def _inyectar_rutas_en_servidor_activo() -> None:
             if not m or not hasattr(m, "app"):
                 continue
             app_inst = getattr(m, "app")
+            if hasattr(m, "BRIDGE_BODY_LOCAL") and isinstance(m.BRIDGE_BODY_LOCAL, str):
+                m.BRIDGE_BODY_LOCAL = m.BRIDGE_BODY_LOCAL.replace(
+                    "if (typeof window.aplicarSeleccionDesdeContextoCheckIn === 'function') {",
+                    "if (typeof window.aplicarSeleccionDesdeContextoCheckIn === 'function' || typeof window.aplicarContextoPago === 'function' || typeof window.aplicarContextoTienda === 'function') {"
+                )
             if hasattr(m, "WRITE_METHODS") and isinstance(m.WRITE_METHODS, set):
                 m.WRITE_METHODS.update({
                     "editarEstanciaBDAdmin", "eliminarEstanciaBDAdmin",

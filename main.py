@@ -221,8 +221,10 @@ BRIDGE_BODY_LOCAL = """
 
     window.aplicarContextoDesdePanel = function(ctx) {
       if (!ctx) return;
-      if (typeof window.aplicarSeleccionDesdeContextoCheckIn === 'function') {
-        return; // CheckInRapido ya gestiona SET_CONTEXT sin condiciones de carrera
+      if (typeof window.aplicarSeleccionDesdeContextoCheckIn === 'function' ||
+          typeof window.aplicarContextoPago === 'function' ||
+          typeof window.aplicarContextoTienda === 'function') {
+        return; // CheckInRapido, PagosPosteriores y VentaTienda ya gestionan SET_CONTEXT directamente con UUID/fecha exacta
       }
       if (ctx.fechaPanelISO) {
         var fInIso = String(ctx.fechaPanelISO).trim();

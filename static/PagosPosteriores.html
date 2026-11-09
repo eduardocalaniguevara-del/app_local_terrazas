@@ -714,8 +714,12 @@
       const idTarget = String(CTX_HAB_PANEL.id || '').trim();
       const checkInTarget = String(CTX_HAB_PANEL.checkIn || '').trim();
 
+      const uuidTarget = String(CTX_HAB_PANEL.estanciaUuid || '').trim();
       let idx = -1;
-      if (filaTarget > 0) {
+      if (uuidTarget) {
+        idx = ESTANCIAS.findIndex(e => String(e.estanciaUuid || '').trim() === uuidTarget);
+      }
+      if (idx === -1 && filaTarget > 0) {
         idx = ESTANCIAS.findIndex(e => Number(e.fila) === filaTarget);
       }
       if (idx === -1 && idTarget) {
@@ -724,7 +728,7 @@
       if (idx === -1 && checkInTarget && checkInTarget !== '-') {
         idx = ESTANCIAS.findIndex(e => String(e.hab).trim() === habTarget && String(e.fechaIn || '').trim() === checkInTarget);
       }
-      if (idx === -1) {
+      if (idx === -1 && !uuidTarget && !idTarget && (!checkInTarget || checkInTarget === '-')) {
         idx = ESTANCIAS.findIndex(e => String(e.hab).trim() === habTarget);
       }
 
@@ -759,7 +763,11 @@
         });
         renderizarSelectorEstancias();
         idx = ESTANCIAS.findIndex(e =>
-          (filaTarget > 0 && Number(e.fila) === filaTarget) || String(e.hab).trim() === habTarget
+          (uuidTarget && String(e.estanciaUuid || '').trim() === uuidTarget) ||
+          (idTarget && String(e.id || '').trim() === idTarget) ||
+          (filaTarget > 0 && Number(e.fila) === filaTarget) ||
+          (checkInTarget && checkInTarget !== '-' && String(e.hab).trim() === habTarget && String(e.fechaIn || '').trim() === checkInTarget) ||
+          String(e.hab).trim() === habTarget
         );
       }
 
@@ -779,6 +787,7 @@
       CTX_HAB_PANEL = ctx;
       if (bloqueSeleccionHabPago) bloqueSeleccionHabPago.style.display = 'none';
       vincularEstanciaDesdeContexto();
+      cargarCuentas();
     };
 
     window.addEventListener('message', (e) => {
@@ -826,11 +835,12 @@
         const opt = document.createElement('option');
         opt.value = idx;
         const saldo = Number(est.saldo) || 0;
+        const fInTag = est.fechaIn ? ` [${est.fechaIn}]` : '';
         if (saldo > 0) {
-          opt.textContent = `${est.hab} — ${est.nombre} (Debe: S/ ${saldo.toFixed(2)})`;
+          opt.textContent = `${est.hab} — ${est.nombre}${fInTag} (Debe: S/ ${saldo.toFixed(2)})`;
           grpDebe.appendChild(opt);
         } else {
-          opt.textContent = `${est.hab} — ${est.nombre} (Pagado)`;
+          opt.textContent = `${est.hab} — ${est.nombre}${fInTag} (Pagado)`;
           grpAlDia.appendChild(opt);
         }
       });
@@ -1033,6 +1043,8 @@
       const payload = {
         fila: est.fila,
         id: est.id,
+        estanciaUuid: est.estanciaUuid || '',
+        fechaIn: est.fechaIn || '',
         hab: est.hab,
         nombre: est.nombre,
         monto: montoVal,
