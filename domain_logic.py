@@ -3728,7 +3728,7 @@ def _limpiar_header_vitrina(raw_hdr: str, fallback: str) -> str:
     return s
 
 
-CLAVE_GESTION_TIENDA = "eleiza"
+CLAVE_GESTION_TIENDA = "nancy"
 
 
 def _validar_clave_gestion_tienda(datos: Dict[str, Any]) -> None:

@@ -22,7 +22,7 @@ from database import db_transaction, get_connection
 import domain_logic as dl
 
 # Hash SHA-256 de la clave de Cuentas/Pagos (la clave nunca se guarda ni se muestra en claro).
-_CLAVE_CUENTAS_SHA256 = "947ebb53c00a42907060aea69f503600eec08ef75da83109f2958865a4d8f934"
+_CLAVE_CUENTAS_SHA256 = "968287f6b05de98a8870a437fee3a0384c241ffd9a41425d9873db8742e28271"
 
 CAMPOS_HORA = ("e1", "s1", "e2", "s2")
 CAMPOS_ADMIN: Tuple[str, ...] = ()  # Estado (F) y Horas Extras (G) libres sin clave (auditados siempre)
