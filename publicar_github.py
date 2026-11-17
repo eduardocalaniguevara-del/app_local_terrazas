@@ -13,7 +13,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 GIT_EXE = r"C:\Hostal_Sistema\tools\mingit\cmd\git.exe"
-REPO_SLUG = "github.com/eduardocalaniguevara-del/app_local_recepcion.git"
+REPO_SLUG = "github.com/eduardocalaniguevara-del/app_local_terrazas.git"
 CRED_TARGET = "GitHub - https://api.github.com/eduardocalaniguevara-del"
 
 

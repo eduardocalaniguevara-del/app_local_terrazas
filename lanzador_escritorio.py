@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Lanzador Autónomo de Escritorio — Recepción Hotel Óvalo Mariátegui
-Se ejecuta con doble clic desde el ícono del Escritorio ("Recepción Hotel Óvalo (Local)"):
-- No usa ni consume nada de Antigravity / IA (corre 100% en tu Windows local).
-- Si el motor local aún no está prendido, lo enciende en silencio y abre Chrome.
-- Si ya estaba prendido, abre la ventana de Recepción inmediatamente.
+Lanzador Autónomo de Escritorio — Recepción Hotel Terrazas de Villa
+- Crea automáticamente el acceso directo nativo en el Escritorio apuntando directo a pythonw.exe
+  (evita bloqueos de Windows SmartScreen sobre archivos .bat y problemas de asociación de .py).
+- Si se ejecuta desde consola (python.exe), lanza el demonio en pythonw.exe desacoplado para que
+  cerrar la ventana negra nunca apague el servidor.
 """
 
 import os
@@ -26,11 +26,54 @@ HOST = APP_HOST
 PORT = APP_PORT
 URL = f"http://{HOST}:{PORT}"
 
-CHROME_PATHS = [
+BROWSER_PATHS = [
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
     os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
 ]
+
+
+def asegurar_icono_escritorio_nativo() -> None:
+    """Crea el acceso directo en el Escritorio apuntando directo a pythonw.exe (0 bloqueos .bat)."""
+    if os.name != "nt":
+        return
+    try:
+        py_exe = Path(sys.executable).resolve()
+        pyw_exe = py_exe.with_name("pythonw.exe")
+        if not pyw_exe.exists():
+            pyw_exe = py_exe
+        script_path = Path(__file__).resolve()
+        ps_cmd = f'''
+$ws = New-Object -ComObject WScript.Shell
+$dirs = @([Environment]::GetFolderPath('Desktop'), "$env:USERPROFILE\\Desktop", "$env:USERPROFILE\\OneDrive\\Desktop") | Select-Object -Unique
+foreach ($d in $dirs) {{
+    if ($d -and (Test-Path $d)) {{
+        foreach ($name in @("Recepcion Hotel Terrazas (Local).lnk", "Recepcion Hotel Terrazas.lnk")) {{
+            $lnk = Join-Path $d $name
+            $s = $ws.CreateShortcut($lnk)
+            $s.TargetPath = "{pyw_exe}"
+            $s.Arguments = '"{script_path}"'
+            $s.WorkingDirectory = "{APP_DIR}"
+            $s.Description = "Abrir {NOMBRE_HOTEL}"
+            if (Test-Path "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe") {{
+                $s.IconLocation = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe,0"
+            }} elseif (Test-Path "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe") {{
+                $s.IconLocation = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe,0"
+            }}
+            $s.Save()
+        }}
+    }}
+}}
+'''
+        subprocess.run(
+            ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps_cmd],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=8,
+        )
+    except Exception:
+        pass
 
 
 def servidor_activo() -> bool:
@@ -44,11 +87,11 @@ def servidor_activo() -> bool:
 def abrir_navegador_app() -> None:
     if "--no-browser" in sys.argv:
         return
-    for chrome_exe in CHROME_PATHS:
-        if os.path.exists(chrome_exe):
+    for browser_exe in BROWSER_PATHS:
+        if os.path.exists(browser_exe):
             try:
                 subprocess.Popen(
-                    [chrome_exe, f"--app={URL}"],
+                    [browser_exe, f"--app={URL}"],
                     cwd=str(APP_DIR),
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
@@ -73,19 +116,34 @@ def _esperar_y_abrir_navegador() -> None:
 
 
 def main() -> None:
+    threading.Thread(target=asegurar_icono_escritorio_nativo, daemon=True).start()
+
     if servidor_activo():
         abrir_navegador_app()
         return
+
+    # Si se ejecutó con python.exe (consola) y no tiene --daemon, relanzar en pythonw.exe desacoplado
+    # para que al cerrar la ventana negra el servidor siga vivo en segundo plano.
+    exe_name = Path(sys.executable).name.lower()
+    if os.name == "nt" and exe_name == "python.exe" and "--daemon" not in sys.argv:
+        pyw = Path(sys.executable).with_name("pythonw.exe")
+        if pyw.exists():
+            subprocess.Popen(
+                [str(pyw), str(Path(__file__).resolve()), "--daemon"] + sys.argv[1:],
+                cwd=str(APP_DIR),
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+                close_fds=True,
+            )
+            _esperar_y_abrir_navegador()
+            return
 
     log_path = APP_DIR / "server_local.log"
     log_file = open(log_path, "a", encoding="utf-8", buffering=1)
     sys.stdout = log_file
     sys.stderr = log_file
 
-    # Abrir el navegador apenas el puerto 8080 responda
     threading.Thread(target=_esperar_y_abrir_navegador, daemon=True).start()
 
-    # Iniciar el servidor FastAPI directamente en este proceso silencioso
     import uvicorn
     from main import app
 

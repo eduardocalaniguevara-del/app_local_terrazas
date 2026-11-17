@@ -111,7 +111,7 @@ def build_panel_disponibilidad():
         '       style="background-color: #FAF6F3; border-color: #DFD2C5;">'
     )
     new_table_wrapper = (
-        '  <div id="vistaPanelTabla" class="rounded-lg shadow-xs border overflow-x-hidden flex-1 min-h-0 overflow-y-auto"\n'
+        '  <div id="vistaPanelTabla" class="rounded-lg shadow-xs border overflow-x-auto flex-1 min-h-0 overflow-y-auto"\n'
         '       tabindex="0" role="region" aria-label="Panel de disponibilidad de habitaciones"\n'
         '       style="background-color: #FAF6F3; border-color: #DFD2C5;">'
     )

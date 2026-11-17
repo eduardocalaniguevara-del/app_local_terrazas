@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 > nul
 title Instalador Automatico - Hotel Terrazas de Villa
 color 0A
 cd /d "%~dp0"
@@ -13,30 +12,29 @@ echo.
 set "DEST_DIR=C:\Recepcion_Terrazas_Local"
 set "GIT_DIR=C:\Hostal_Sistema\tools\mingit"
 set "GIT_EXE=%GIT_DIR%\cmd\git.exe"
-set "REPO_URL=https://github.com/eduardocalaniguevara-del/app_local_recepcion.git"
+set "REPO_URL=https://github.com/eduardocalaniguevara-del/app_local_terrazas.git"
 
 :: -------------------------------------------------------------------
 :: 1. VERIFICAR O INSTALAR PYTHON
 :: -------------------------------------------------------------------
-echo [1/6] Verificando instalacion de Python...
+echo [1/6] Verificando instalacion real de Python (ignorando alias de tienda Windows)...
 set "PY_CMD="
-where python >nul 2>&1 && set "PY_CMD=python"
-if "%PY_CMD%"=="" (
-    where py >nul 2>&1 && set "PY_CMD=py"
-)
-if "%PY_CMD%"=="" (
-    if exist "%LocalAppData%\Programs\Python\Python311\python.exe" set "PY_CMD=%LocalAppData%\Programs\Python\Python311\python.exe"
-    if exist "%LocalAppData%\Programs\Python\Python312\python.exe" set "PY_CMD=%LocalAppData%\Programs\Python\Python312\python.exe"
-    if exist "C:\Python311\python.exe" set "PY_CMD=C:\Python311\python.exe"
-)
+if exist "%LocalAppData%\Programs\Python\Python312\python.exe" set "PY_CMD=%LocalAppData%\Programs\Python\Python312\python.exe"
+if exist "%LocalAppData%\Programs\Python\Python311\python.exe" set "PY_CMD=%LocalAppData%\Programs\Python\Python311\python.exe"
+if exist "%LocalAppData%\Programs\Python\Python313\python.exe" set "PY_CMD=%LocalAppData%\Programs\Python\Python313\python.exe"
+if exist "C:\Python312\python.exe" set "PY_CMD=C:\Python312\python.exe"
+if exist "C:\Python311\python.exe" set "PY_CMD=C:\Python311\python.exe"
+if exist "C:\Program Files\Python312\python.exe" set "PY_CMD=C:\Program Files\Python312\python.exe"
+if exist "C:\Program Files\Python311\python.exe" set "PY_CMD=C:\Program Files\Python311\python.exe"
 
 if "%PY_CMD%"=="" (
-    echo [AVISO] Python no detectado. Descargando e instalando Python 3.11 oficial...
-    powershell -NoProfile -Command "$installer = \"$env:TEMP\python_installer.exe\"; Write-Host 'Descargando instalador...'; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile $installer; Write-Host 'Instalando silenciosamente (puede demorar 1-2 minutos)...'; Start-Process -FilePath $installer -ArgumentList '/quiet InstallAllUsers=0 PrependPath=1 Include_pip=1' -Wait; Remove-Item -Path $installer -Force -ErrorAction SilentlyContinue"
-    
-    :: Actualizar variables de entorno para esta ventana
-    set "PATH=%LocalAppData%\Programs\Python\Python311;%LocalAppData%\Programs\Python\Python311\Scripts;%PATH%"
-    set "PY_CMD=python"
+    echo [AVISO] Python no instalado. Descargando e instalando Python 3.12 con curl (bajo uso de memoria)...
+    curl.exe -L -o "%TEMP%\python_installer.exe" "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe"
+    if exist "%TEMP%\python_installer.exe" (
+        "%TEMP%\python_installer.exe" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_pip=1
+        del /f /q "%TEMP%\python_installer.exe" >nul 2>&1
+    )
+    if exist "%LocalAppData%\Programs\Python\Python312\python.exe" set "PY_CMD=%LocalAppData%\Programs\Python\Python312\python.exe"
 )
 echo [OK] Python listo.
 
@@ -68,18 +66,19 @@ if not exist "%DEST_DIR%\.git" (
     "%GIT_EXE%" -C "%DEST_DIR%" branch -M main > nul 2>&1
     "%GIT_EXE%" -C "%DEST_DIR%" remote add origin %REPO_URL% > nul 2>&1
 )
+"%GIT_EXE%" -C "%DEST_DIR%" remote set-url origin %REPO_URL% > nul 2>&1
 "%GIT_EXE%" -C "%DEST_DIR%" fetch origin main
 "%GIT_EXE%" -C "%DEST_DIR%" reset --hard origin/main
-echo [OK] Codigo base sincronizado con GitHub.
+echo [OK] Codigo base sincronizado con GitHub (Terrazas).
 
 :: -------------------------------------------------------------------
-:: 4. CONFIGURAR PERFIL EXCLUSIVO HOTEL TERRAZAS
+:: 4. CONFIGURAR PERFIL EXCLUSIVO HOTEL TERRAZAS (PUERTO 8081)
 :: -------------------------------------------------------------------
 echo.
-echo [4/6] Configurando perfil del Hotel Terrazas de Villa...
+echo [4/6] Configurando perfil del Hotel Terrazas de Villa (Puerto 8081)...
 if not exist "%DEST_DIR%\data" mkdir "%DEST_DIR%\data"
 
-powershell -NoProfile -Command "$perfil = @{ nombre_hotel = 'Hotel Terrazas de Villa'; spreadsheet_id = '1vgjOLxc-eh1zw42uC3pxnM86Lo2jZkz8_uwrEFhw8ss'; col_tipo_adicional = 'AZ'; formula_snacks_en_s2 = $true; app_port = 8080 }; $perfil | ConvertTo-Json | Set-Content -Path '%DEST_DIR%\data\hotel_perfil.json' -Encoding UTF8"
+powershell -NoProfile -Command "$perfil = @{ nombre_hotel = 'Hotel Terrazas de Villa'; spreadsheet_id = '1vgjOLxc-eh1zw42uC3pxnM86Lo2jZkz8_uwrEFhw8ss'; col_tipo_adicional = 'AZ'; formula_snacks_en_s2 = $true; app_port = 8081 }; $perfil | ConvertTo-Json | Set-Content -Path '%DEST_DIR%\data\hotel_perfil.json' -Encoding UTF8"
 echo [OK] Perfil configurado para Terrazas.
 
 :: -------------------------------------------------------------------
@@ -95,10 +94,10 @@ echo [OK] Credenciales instaladas de forma segura.
 :: -------------------------------------------------------------------
 echo.
 echo [6/6] Verificando dependencias de Python y creando acceso directo...
-%PY_CMD% -m pip install fastapi uvicorn pydantic requests gspread google-api-python-client google-auth --quiet
+%PY_CMD% -m pip install fastapi uvicorn pydantic requests gspread google-api-python-client google-auth httpx --quiet
 
 :: Crear acceso directo en el Escritorio
-powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\Recepcion Hotel Terrazas.lnk'); $s.TargetPath = '%DEST_DIR%\Iniciar_Recepcion_Local.bat'; $s.WorkingDirectory = '%DEST_DIR%'; $s.Save()"
+powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; foreach ($d in @([Environment]::GetFolderPath('Desktop'), \"$env:USERPROFILE\Desktop\", \"$env:USERPROFILE\OneDrive\Desktop\") | Select-Object -Unique) { if ($d -and (Test-Path $d)) { $s = $ws.CreateShortcut(\"$d\Recepcion Hotel Terrazas (Local).lnk\"); $s.TargetPath = '%DEST_DIR%\Iniciar_Recepcion_Local.bat'; $s.WorkingDirectory = '%DEST_DIR%'; if (Test-Path 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe') { $s.IconLocation = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe,0' } elseif (Test-Path 'C:\Program Files\Google\Chrome\Application\chrome.exe') { $s.IconLocation = 'C:\Program Files\Google\Chrome\Application\chrome.exe,0' }; $s.Save(); Copy-Item '%DEST_DIR%\Iniciar_Recepcion_Local.bat' \"$d\Abrir_Hotel_Terrazas.bat\" -Force } }"
 echo [OK] Acceso directo 'Recepcion Hotel Terrazas' creado en el Escritorio.
 
 echo.
