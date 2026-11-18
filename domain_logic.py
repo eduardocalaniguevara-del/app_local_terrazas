@@ -3852,7 +3852,7 @@ def _calcular_stocks_almacen_y_deltas_conn(conn) -> Tuple[Dict[str, float], Dict
         # Impacto en Almacén
         if tipo in ("INVENTARIO_INICIAL_ALMACEN", "COMPRA", "AJUSTE_ALMACEN"):
             stock_alm[prod] = stock_alm.get(prod, 0.0) + cant
-        elif tipo in ("TRANSFERENCIA", "MERMA_ALMACEN"):
+        elif tipo in ("TRANSFERENCIA", "MERMA_ALMACEN", "TRASPASO_KEYMAR"):
             stock_alm[prod] = stock_alm.get(prod, 0.0) - cant
         elif tipo == "MERMA":
             # Compatibilidad 100% con los 13 registros históricos de la hoja antigua (sin etiqueta [VITRINA]),
@@ -4569,11 +4569,11 @@ def cerrar_compra_pendiente_tienda_local(datos: Dict[str, Any]) -> Dict[str, Any
 
 def registrar_movimiento_tienda_local(datos: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Maneja Traspaso (Almacén -> Vitrina), Merma Vitrina, Merma Almacén y Ajuste de Stock Almacén.
+    Maneja Traspaso (Almacén -> Vitrina), Merma Vitrina, Merma Almacén, Ajuste de Stock Almacén y Traspaso Keymar.
     """
     _validar_clave_gestion_tienda(datos)
     modo = str(datos.get("modo") or "TRANSFERENCIA").strip().upper()
-    if modo not in ("TRANSFERENCIA", "MERMA_VITRINA", "MERMA_ALMACEN", "AJUSTE_ALMACEN"):
+    if modo not in ("TRANSFERENCIA", "MERMA_VITRINA", "MERMA_ALMACEN", "AJUSTE_ALMACEN", "TRASPASO_KEYMAR"):
         raise ValueError(f"Modo de movimiento inválido: {modo}")
 
     fecha_raw = str(datos.get("fecha") or "").strip()
@@ -4637,6 +4637,14 @@ def registrar_movimiento_tienda_local(datos: Dict[str, Any]) -> Dict[str, Any]:
                         "antes": "Vitrina",
                         "despues": f"Merma -{ _fmt_num_stock(cant_mov) }",
                     })
+                elif modo == "TRASPASO_KEYMAR":
+                    tipo_db = "TRASPASO_KEYMAR"
+                    nota_mov = f"[TRASPASO KEYMAR] {motivo or 'Traspaso a Hostal Keymar'} ({responsable})"
+                    detalles_hist.append({
+                        "campo": prod,
+                        "antes": f"Almacén: {_fmt_num_stock(stock_alm_actual.get(prod, 0.0))}",
+                        "despues": f"Traspaso Keymar -{_fmt_num_stock(cant_mov)}",
+                    })
                 else:  # MERMA_ALMACEN
                     tipo_db = "MERMA_ALMACEN"
                     nota_mov = f"[ALMACEN] {motivo or 'Baja en almacén'} ({responsable})"
@@ -4693,6 +4701,7 @@ def registrar_movimiento_tienda_local(datos: Dict[str, Any]) -> Dict[str, Any]:
             "MERMA_VITRINA": "Merma Vitrina",
             "MERMA_ALMACEN": "Merma Almacén",
             "AJUSTE_ALMACEN": "Ajuste Almacén",
+            "TRASPASO_KEYMAR": "Traspaso Keymar",
         }
         nom_accion = etiquetas.get(modo, "Gestión Tienda")
         _registrar_movimiento(
