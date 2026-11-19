@@ -6182,9 +6182,10 @@ def _inyectar_rutas_en_servidor_activo() -> None:
         from fastapi.responses import FileResponse
 
         for mod_name in ("main", "__main__"):
-            m = _sys.modules.get(mod_name)
-            if not m or not hasattr(m, "app"):
+            cand_m = _sys.modules.get(mod_name)
+            if not cand_m or not hasattr(cand_m, "app"):
                 continue
+            m = cand_m
             app_inst = getattr(m, "app")
             if hasattr(m, "BRIDGE_BODY_LOCAL") and isinstance(m.BRIDGE_BODY_LOCAL, str):
                 m.BRIDGE_BODY_LOCAL = m.BRIDGE_BODY_LOCAL.replace(
@@ -6215,13 +6216,35 @@ def _inyectar_rutas_en_servidor_activo() -> None:
                     return FileResponse(str(pdf_path), media_type="application/pdf", filename=pdf_path.name, headers={"Cache-Control": "no-store"})
 
             # Reemplazar el endpoint /api/rpc/{method_name} en la tabla de rutas de FastAPI en vivo
+            _m_bound = m
             def _nuevo_rpc_handler(method_name: str, body: Any):
                 args = getattr(body, "args", None) or []
                 try:
                     if method_name in ("obtenerDatosPanelDisponibilidad", "cambiarFechaPanelDisponibilidad"):
                         res = _dl_self.obtener_datos_panel_local(args[0] if len(args) > 0 and args[0] else None)
                     elif method_name == "obtenerVistaFormulario":
-                        res = m._obtener_vista_formulario_local(args[0] if args else "")
+                        _fn_vista = getattr(_m_bound, "_obtener_vista_formulario_local", None)
+                        if not _fn_vista and "main" in _sys.modules:
+                            _fn_vista = getattr(_sys.modules["main"], "_obtener_vista_formulario_local", None)
+                        if _fn_vista:
+                            res = _fn_vista(args[0] if args else "")
+                        else:
+                            from config import STATIC_DIR, NOMBRE_HOTEL
+                            _v_map = {
+                                "CheckInRapido": "CheckInRapido.html",
+                                "PagosPosteriores": "PagosPosteriores.html",
+                                "VentaTienda": "VentaTienda.html",
+                                "GastosRegistro": "GastosRegistro.html",
+                            }
+                            _nv = str(args[0] if args else "").strip()
+                            _fp = STATIC_DIR / _v_map.get(_nv, "")
+                            if not _v_map.get(_nv) or not _fp.exists():
+                                raise ValueError(f"Vista no reconocida: {_nv}")
+                            _ht = _fp.read_text(encoding="utf-8").replace("{{NOMBRE_HOTEL}}", NOMBRE_HOTEL)
+                            _br = getattr(_m_bound, "BRIDGE_BODY_LOCAL", "") or getattr(_sys.modules.get("main"), "BRIDGE_BODY_LOCAL", "")
+                            if _br:
+                                _ht = re.sub(r"</body>", lambda _x: _br + "\n</body>", _ht, count=1, flags=re.IGNORECASE) if re.search(r"</body>", _ht, re.IGNORECASE) else (_ht + _br)
+                            res = _ht
                     elif method_name == "obtenerDatosInicialesCheckIn":
                         res = _dl_self.obtener_datos_iniciales_checkin_local()
                     elif method_name in ("consultarDniReniec", "consultarDocumentoPadron"):
@@ -6344,8 +6367,8 @@ def _inyectar_rutas_en_servidor_activo() -> None:
                     else:
                         raise HTTPException(status_code=404, detail=f"Método RPC no soportado: {method_name}")
 
-                    if hasattr(m, "WRITE_METHODS") and method_name in m.WRITE_METHODS and hasattr(m, "_sync_wakeup_event"):
-                        m._sync_wakeup_event.set()
+                    if hasattr(_m_bound, "WRITE_METHODS") and method_name in _m_bound.WRITE_METHODS and hasattr(_m_bound, "_sync_wakeup_event"):
+                        _m_bound._sync_wakeup_event.set()
 
                     sync_st = _dl_self.obtener_estado_red_cola()
                     if isinstance(res, dict) and "syncStatus" not in res:
