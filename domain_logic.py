@@ -6379,11 +6379,23 @@ def _inyectar_rutas_en_servidor_activo() -> None:
                 except Exception as exc:
                     raise HTTPException(status_code=400, detail=str(exc))
 
+            def _nuevo_system_update():
+                from auto_updater import verificar_y_aplicar_actualizacion, reiniciar_servidor_en_caliente
+                res_u = verificar_y_aplicar_actualizacion()
+                reiniciar_servidor_en_caliente()
+                if hasattr(_m_bound, "_sync_wakeup_event"):
+                    _m_bound._sync_wakeup_event.set()
+                return res_u
+
             for r in getattr(app_inst, "routes", []):
                 if getattr(r, "path", "") == "/api/rpc/{method_name}":
                     r.endpoint = _nuevo_rpc_handler
                     if hasattr(r, "dependant") and hasattr(r.dependant, "call"):
                         r.dependant.call = _nuevo_rpc_handler
+                elif getattr(r, "path", "") == "/api/system/update":
+                    r.endpoint = _nuevo_system_update
+                    if hasattr(r, "dependant") and hasattr(r.dependant, "call"):
+                        r.dependant.call = _nuevo_system_update
     except Exception:
         pass
 

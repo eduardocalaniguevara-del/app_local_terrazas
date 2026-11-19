@@ -136,9 +136,21 @@
           </span>
         </div>
 
-        <span id="badgeEstadoSync" class="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200">
-          🟢 En vivo
-        </span>
+        <div class="inline-flex items-center gap-1.5 flex-wrap">
+          <span id="badgeEstadoSync" class="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200">
+            🟢 En vivo
+          </span>
+
+          <button id="btnActualizar" type="button" onclick="recargarDatos(event)" title="Actualizar datos en tiempo real con Google Sheets"
+                  class="px-2 py-0.5 rounded font-bold bg-slate-700 hover:bg-slate-800 text-white text-[11px] transition-colors flex items-center gap-1 shadow-2xs cursor-pointer">
+            🔄 Actualizar
+          </button>
+
+          <button id="btnReiniciarApp" type="button" onclick="reiniciarAplicacionUI(event)" title="Reiniciar aplicación, recargar módulos y buscar última versión"
+                  class="px-2 py-0.5 rounded font-extrabold bg-indigo-700 hover:bg-indigo-800 text-white text-[11px] transition-colors flex items-center gap-1 shadow-2xs cursor-pointer">
+            ⚡ Reiniciar
+          </button>
+        </div>
 
         <!-- Indicador de Fecha Histórica Sellada (Solo aparece si la fecha es anterior a Ayer) -->
         <span id="badgeModoHistorico" class="hidden text-[11px] font-extrabold text-amber-900 bg-amber-100 px-2 py-0.5 rounded border border-amber-300 shadow-2xs">
@@ -146,7 +158,7 @@
         </span>
       </div>
 
-      <!-- Centro / Derecha: Filtros + Buscador + Actualizar + Gastos -->
+      <!-- Centro / Derecha: Filtros + Buscador + Gastos -->
       <div id="barraFiltrosPanel" class="flex items-center gap-1.5 flex-wrap ml-auto">
       <button class="filter-btn px-2 py-1 rounded font-extrabold bg-red-600 hover:bg-red-700 text-white text-[11px] shadow-xs flex items-center gap-1 transition-colors cursor-pointer" data-filter="debe">
         <span>⚠️ Con Deuda:</span>
@@ -162,11 +174,6 @@
 
       <input type="text" id="busquedaInput" placeholder="🔍 Hab o huésped..."
              class="px-2 py-1 rounded border border-[#D8C7B8] text-xs bg-white w-32 sm:w-40 focus:outline-hidden focus:ring-1 focus:ring-blue-600">
-
-      <button id="btnActualizar" onclick="recargarDatos(event)" title="Actualizar datos en tiempo real"
-              class="px-2 py-1 rounded font-bold bg-slate-700 hover:bg-slate-800 text-white text-[11px] transition-colors flex items-center gap-1 shadow-2xs cursor-pointer">
-        🔄 Actualizar
-      </button>
 
       <span class="text-[#D8C7B8] hidden sm:inline">|</span>
 
@@ -4670,6 +4677,32 @@
     // - Al cerrar el Drawer lateral o refrescar, sincroniza en silencio sin mostrar la pantalla de carga,
     //   y solo activa la tarjeta si la conexión se cuelga o demora más de 6 segundos (watchdog).
     window.recargarDatos = recargarDatos;
+    window.reiniciarAplicacionUI = function(e) {
+      if (e) e.preventDefault();
+      var btnR = document.getElementById('btnReiniciarApp');
+      if (btnR) {
+        btnR.disabled = true;
+        btnR.textContent = '⏳ Reiniciando...';
+      }
+      if (badgeSync) {
+        badgeSync.className = "text-[11px] font-extrabold text-indigo-900 bg-indigo-100 px-2.5 py-0.5 rounded border border-indigo-300";
+        badgeSync.textContent = "⚡ Reiniciando aplicación...";
+      }
+      var recargarVentana = function() {
+        window.location.reload();
+      };
+      var tMax = setTimeout(recargarVentana, 2500);
+      Promise.allSettled([
+        fetch("/api/system/update", { method: "POST" }),
+        fetch("/api/sync/trigger", { method: "POST" })
+      ]).then(function() {
+        clearTimeout(tMax);
+        setTimeout(recargarVentana, 350);
+      }).catch(function() {
+        clearTimeout(tMax);
+        recargarVentana();
+      });
+    };
     function recargarDatos(e) {
       if (e) {
         e.preventDefault();
